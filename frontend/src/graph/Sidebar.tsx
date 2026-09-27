@@ -4,7 +4,7 @@ import { createContributor, listContributors, uploadDataset, uploadModel } from 
 interface Contributor { id: string; name: string }
 
 interface Props {
-  onSelect: (id: string) => void
+  onSelect: (id: string, name: string) => void
   selected: string | null
 }
 
@@ -69,7 +69,7 @@ export default function Sidebar({ onSelect, selected }: Props) {
         {contributors.map(c => (
           <button
             key={c.id}
-            onClick={() => onSelect(c.id)}
+            onClick={() => onSelect(c.id, c.name)}
             style={{
               ...btnStyle,
               textAlign: 'left',
