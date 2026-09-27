@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { verifyModel, tamperModel, restoreModel, verifyDataset, tamperDataset } from '../shared/api'
+import InterrogationRoom from '../interrogation/InterrogationRoom'
 
 interface Props {
   nodeId: string
@@ -23,6 +24,7 @@ const btnBase: React.CSSProperties = {
 
 export default function NodePanel({ nodeId, nodeType, label, status, onClose }: Props) {
   const [busy, setBusy] = useState(false)
+  const [showInterrogation, setShowInterrogation] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
 
   const run = async (action: () => Promise<unknown>, successMsg: string) => {
@@ -48,6 +50,7 @@ export default function NodePanel({ nodeId, nodeType, label, status, onClose }: 
   }
 
   return (
+    <>
     <div style={{
       position: 'fixed',
       bottom: 24,
@@ -87,6 +90,12 @@ export default function NodePanel({ nodeId, nodeType, label, status, onClose }: 
             style={{ ...btnBase, background: 'var(--surface2)', color: 'var(--success)' }}
           >
             🔍 Verify Integrity
+          </button>
+          <button
+            onClick={() => setShowInterrogation(true)}
+            style={{ ...btnBase, background: '#1a0a2a', color: 'var(--suspicious)', borderColor: '#2a1040' }}
+          >
+            🔬 Backdoor Scan
           </button>
           <button
             disabled={busy}
@@ -138,5 +147,14 @@ export default function NodePanel({ nodeId, nodeType, label, status, onClose }: 
         </div>
       )}
     </div>
+
+    {showInterrogation && (
+      <InterrogationRoom
+        modelId={nodeId}
+        modelLabel={label}
+        onClose={() => setShowInterrogation(false)}
+      />
+    )}
+  </>
   )
 }
