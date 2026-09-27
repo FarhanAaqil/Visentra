@@ -31,6 +31,9 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 BASE_URL = os.getenv("VISENTRA_API", "http://localhost:8000")
 
 # ---------------------------------------------------------------------------

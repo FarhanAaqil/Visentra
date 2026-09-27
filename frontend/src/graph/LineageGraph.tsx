@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   ReactFlow,
   Background,
@@ -8,14 +8,14 @@ import {
   useEdgesState,
   addEdge,
   BackgroundVariant,
-  Node,
-  Edge,
-  Connection,
-  NodeMouseHandler,
+  type Node,
+  type Edge,
+  type Connection,
+  type NodeMouseHandler,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
-import LineageNode, { LineageNodeData } from './LineageNode'
+import LineageNode, { type LineageNodeData } from './LineageNode'
 import NodePanel from './NodePanel'
 import { getChain } from '../shared/api'
 import { useStatusSocket } from '../shared/useStatusSocket'

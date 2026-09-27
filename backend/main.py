@@ -1,7 +1,18 @@
+import sys
+from pathlib import Path
+from contextlib import asynccontextmanager
+
+# Allow running uvicorn from either repo root or inside backend/
+_root = str(Path(__file__).resolve().parent.parent)
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.config import settings
+from backend.db.session import engine
+from backend.db.models import Base
 from backend.api.contributors import router as contributors_router
 from backend.api.datasets import router as datasets_router
 from backend.api.models import router as models_router
@@ -13,10 +24,19 @@ from backend.api.dataset_assurance import router as dataset_assurance_router
 from backend.api.report import router as report_router
 from backend.api.ws import router as ws_router
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield
+
+
 app = FastAPI(
     title="VISENTRA",
     description="AI Integrity Assurance Platform — SIH26228",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

@@ -1,7 +1,7 @@
 import uuid
 import datetime
 from sqlalchemy import (
-    Column, String, DateTime, ForeignKey, Text, Float, Integer, ARRAY, JSON, func
+    Column, String, DateTime, ForeignKey, Text, Float, Integer, JSON, func
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import declarative_base, relationship
@@ -52,7 +52,7 @@ class DatasetSample(Base):
     path = Column(String(512), nullable=False)
     phash = Column(String(64))
     embedding_ref = Column(String(256))
-    flags = Column(ARRAY(String), default=list)
+    flags = Column(JSON, default=list)
 
     dataset = relationship("Dataset", back_populates="samples")
 

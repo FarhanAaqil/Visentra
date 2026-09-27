@@ -1,5 +1,5 @@
-import React, { memo } from 'react'
-import { Handle, Position, NodeProps } from '@xyflow/react'
+import { memo } from 'react'
+import { Handle, Position, type NodeProps } from '@xyflow/react'
 
 const STATUS_COLOR: Record<string, string> = {
   verified: 'var(--success)',
