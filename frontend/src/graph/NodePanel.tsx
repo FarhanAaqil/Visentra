@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { verifyModel, tamperModel, restoreModel, verifyDataset, tamperDataset, reverifyInference } from '../shared/api'
 import InterrogationRoom from '../interrogation/InterrogationRoom'
 import EvidenceRecord from '../evidence/EvidenceRecord'
+import DatasetInspector from '../inspector/DatasetInspector'
 
 interface Props {
   nodeId: string
@@ -27,6 +28,7 @@ export default function NodePanel({ nodeId, nodeType, label, status, onClose }: 
   const [busy, setBusy] = useState(false)
   const [showInterrogation, setShowInterrogation] = useState(false)
   const [showEvidence, setShowEvidence] = useState(false)
+  const [showInspector, setShowInspector] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
 
   const run = async (action: () => Promise<unknown>, successMsg: string) => {
@@ -127,6 +129,12 @@ export default function NodePanel({ nodeId, nodeType, label, status, onClose }: 
             🔍 Verify Integrity
           </button>
           <button
+            onClick={() => setShowInspector(true)}
+            style={{ ...btnBase, background: '#1a1a0a', color: 'var(--warning)', borderColor: '#2a2a10' }}
+          >
+            🔎 Inspect Dataset
+          </button>
+          <button
             disabled={busy}
             onClick={() => run(() => tamperDataset(nodeId), 'File tampered! Now hit Verify to see it flip red.')}
             style={{ ...btnBase, background: '#2a1515', color: 'var(--danger)', borderColor: '#3a1515' }}
@@ -180,6 +188,13 @@ export default function NodePanel({ nodeId, nodeType, label, status, onClose }: 
       <EvidenceRecord
         inferenceId={nodeId}
         onClose={() => setShowEvidence(false)}
+      />
+    )}
+    {showInspector && (
+      <DatasetInspector
+        datasetId={nodeId}
+        datasetLabel={label}
+        onClose={() => setShowInspector(false)}
       />
     )}
   </>
