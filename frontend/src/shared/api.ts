@@ -46,6 +46,21 @@ export const tamperModel = (id: string) =>
 export const restoreModel = (id: string) =>
   api.post(`/demo/models/${id}/restore`).then(r => r.data)
 
+// --- inference ---
+export const runInference = (modelId: string, imageFile: File, config = '{}'): Promise<unknown> => {
+  const fd = new FormData()
+  fd.append('image', imageFile)
+  fd.append('model_id', modelId)
+  fd.append('config', config)
+  return api.post('/inference', fd).then(r => r.data)
+}
+
+export const getInference = (id: string) =>
+  api.get(`/inference/${id}`).then(r => r.data)
+
+export const reverifyInference = (id: string) =>
+  api.post(`/inference/${id}/reverify`).then(r => r.data)
+
 // --- chain ---
 export const getChain = (contributorId: string) =>
   api.get(`/chain/${contributorId}`).then(r => r.data)

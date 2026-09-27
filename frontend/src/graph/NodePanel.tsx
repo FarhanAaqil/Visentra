@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
-import { verifyModel, tamperModel, restoreModel, verifyDataset, tamperDataset } from '../shared/api'
+import { verifyModel, tamperModel, restoreModel, verifyDataset, tamperDataset, reverifyInference } from '../shared/api'
 import InterrogationRoom from '../interrogation/InterrogationRoom'
+import EvidenceRecord from '../evidence/EvidenceRecord'
 
 interface Props {
   nodeId: string
@@ -25,6 +26,7 @@ const btnBase: React.CSSProperties = {
 export default function NodePanel({ nodeId, nodeType, label, status, onClose }: Props) {
   const [busy, setBusy] = useState(false)
   const [showInterrogation, setShowInterrogation] = useState(false)
+  const [showEvidence, setShowEvidence] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
 
   const run = async (action: () => Promise<unknown>, successMsg: string) => {
@@ -134,6 +136,25 @@ export default function NodePanel({ nodeId, nodeType, label, status, onClose }: 
         </>
       )}
 
+      {/* Inference actions */}
+      {nodeType === 'inference' && (
+        <>
+          <button
+            onClick={() => setShowEvidence(true)}
+            style={{ ...btnBase, background: 'var(--surface2)', color: 'var(--accent)' }}
+          >
+            📋 View Evidence Record
+          </button>
+          <button
+            disabled={busy}
+            onClick={() => run(() => reverifyInference(nodeId), 'Re-verification complete — check result above')}
+            style={{ ...btnBase, background: 'var(--surface2)', color: 'var(--success)' }}
+          >
+            🔍 Re-verify Hashes
+          </button>
+        </>
+      )}
+
       {msg && (
         <div style={{
           padding: '8px 12px',
@@ -153,6 +174,12 @@ export default function NodePanel({ nodeId, nodeType, label, status, onClose }: 
         modelId={nodeId}
         modelLabel={label}
         onClose={() => setShowInterrogation(false)}
+      />
+    )}
+    {showEvidence && (
+      <EvidenceRecord
+        inferenceId={nodeId}
+        onClose={() => setShowEvidence(false)}
       />
     )}
   </>

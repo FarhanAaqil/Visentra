@@ -8,6 +8,7 @@ from backend.api.models import router as models_router
 from backend.api.chain import router as chain_router
 from backend.api.demo import router as demo_router
 from backend.api.backdoor import router as backdoor_router
+from backend.api.inference import router as inference_router
 from backend.api.ws import router as ws_router
 
 app = FastAPI(
@@ -31,6 +32,7 @@ app.include_router(chain_router)
 app.include_router(ws_router)
 app.include_router(demo_router)
 app.include_router(backdoor_router)
+app.include_router(inference_router)
 
 
 @app.get("/health")
