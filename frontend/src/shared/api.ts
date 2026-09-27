@@ -7,14 +7,12 @@ export const api = axios.create({ baseURL: BASE })
 
 export const WS_URL = BASE.replace(/^http/, 'ws') + '/ws/status'
 
-// --- contributors ---
 export const createContributor = (name: string) =>
   api.post('/contributors', { name }).then(r => r.data)
 
 export const listContributors = () =>
   api.get('/contributors').then(r => r.data)
 
-// --- datasets ---
 export const uploadDataset = (contributorId: string, version: string, file: File) => {
   const fd = new FormData()
   fd.append('file', file)
@@ -29,7 +27,6 @@ export const verifyDataset = (id: string) =>
 export const tamperDataset = (id: string) =>
   api.post(`/demo/datasets/${id}/tamper`).then(r => r.data)
 
-// --- models ---
 export const uploadModel = (contributorId: string, version: string, file: File) => {
   const fd = new FormData()
   fd.append('file', file)
@@ -47,7 +44,6 @@ export const tamperModel = (id: string) =>
 export const restoreModel = (id: string) =>
   api.post(`/demo/models/${id}/restore`).then(r => r.data)
 
-// --- inference ---
 export const runInference = (modelId: string, imageFile: File, config = '{}'): Promise<unknown> => {
   const fd = new FormData()
   fd.append('image', imageFile)
@@ -62,6 +58,6 @@ export const getInference = (id: string) =>
 export const reverifyInference = (id: string) =>
   api.post(`/inference/${id}/reverify`).then(r => r.data)
 
-// --- chain ---
 export const getChain = (contributorId: string) =>
   api.get(`/chain/${contributorId}`).then(r => r.data)
+

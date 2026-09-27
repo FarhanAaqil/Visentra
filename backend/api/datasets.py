@@ -18,14 +18,12 @@ router = APIRouter(prefix="/datasets", tags=["datasets"])
 
 STORAGE = Path(settings.storage_root) / "datasets"
 
-
 async def _sha256_file(path: Path) -> str:
     h = hashlib.sha256()
     async with aiofiles.open(path, "rb") as f:
         while chunk := await f.read(65536):
             h.update(chunk)
     return h.hexdigest()
-
 
 class DatasetOut(BaseModel):
     id: str
@@ -35,7 +33,6 @@ class DatasetOut(BaseModel):
     status: str
     created_at: str
 
-
 @router.post("", response_model=DatasetOut, status_code=201)
 async def upload_dataset(
     file: UploadFile = File(...),
@@ -43,7 +40,6 @@ async def upload_dataset(
     version: str = Form(...),
     db: AsyncSession = Depends(get_db),
 ):
-    # verify contributor exists
     result = await db.execute(select(Contributor).where(Contributor.id == contributor_id))
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Contributor not found")
@@ -68,7 +64,6 @@ async def upload_dataset(
     await db.commit()
     await db.refresh(dataset)
 
-    # rename to content-addressed name
     dest.rename(STORAGE / sha)
 
     await broadcast({"type": "node_status", "node_type": "dataset", "id": dataset.id, "status": "verified"})
@@ -81,7 +76,6 @@ async def upload_dataset(
         status=dataset.status,
         created_at=dataset.created_at.isoformat(),
     )
-
 
 @router.get("/{dataset_id}", response_model=DatasetOut)
 async def get_dataset(dataset_id: str, db: AsyncSession = Depends(get_db)):
@@ -97,7 +91,6 @@ async def get_dataset(dataset_id: str, db: AsyncSession = Depends(get_db)):
         status=dataset.status,
         created_at=dataset.created_at.isoformat(),
     )
-
 
 @router.post("/{dataset_id}/verify", response_model=DatasetOut)
 async def verify_dataset(dataset_id: str, db: AsyncSession = Depends(get_db)):

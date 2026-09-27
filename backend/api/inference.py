@@ -27,10 +27,8 @@ router = APIRouter(prefix="/inference", tags=["inference"])
 MODEL_STORE = Path(settings.storage_root) / "models"
 INFERENCE_STORE = Path(settings.storage_root) / "inference"
 
-
 async def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
-
 
 async def _sha256_file(path: Path) -> str:
     h = hashlib.sha256()
@@ -38,7 +36,6 @@ async def _sha256_file(path: Path) -> str:
         while chunk := await f.read(65536):
             h.update(chunk)
     return h.hexdigest()
-
 
 def _run_onnx_inference(model_path: Path, image_bytes: bytes) -> dict:
     """Run image through ONNX model, return output dict. Falls back to synthetic."""
@@ -73,7 +70,6 @@ def _run_onnx_inference(model_path: Path, image_bytes: bytes) -> dict:
             "synthetic": False,
         }
     except Exception as e:
-        # Synthetic fallback — deterministic based on image hash
         h = int(hashlib.md5(image_bytes[:512]).hexdigest(), 16)
         cls = h % 1000
         conf = 0.55 + (h % 40) / 100
@@ -85,7 +81,6 @@ def _run_onnx_inference(model_path: Path, image_bytes: bytes) -> dict:
             "synthetic_reason": str(e),
         }
 
-
 class InferenceOut(BaseModel):
     id: str
     model_id: str
@@ -96,7 +91,6 @@ class InferenceOut(BaseModel):
     timestamp: str
     status: str
 
-
 class ReverifyOut(BaseModel):
     inference_id: str
     status: str
@@ -104,15 +98,13 @@ class ReverifyOut(BaseModel):
     input_hash_match: bool
     diffs: list[str]
 
-
 @router.post("", response_model=InferenceOut, status_code=201)
 async def run_inference(
     image: UploadFile = File(...),
     model_id: str = Form(...),
-    config: str = Form(default="{}"),   # JSON string of any config params
+    config: str = Form(default="{}"),
     db: AsyncSession = Depends(get_db),
 ):
-    # Verify model exists and is in a verified state
     result = await db.execute(select(Model).where(Model.id == model_id))
     model = result.scalar_one_or_none()
     if not model:
@@ -131,7 +123,6 @@ async def run_inference(
     config_sha = await _sha256_bytes(config_bytes)
     model_sha_actual = await _sha256_file(model_path)
 
-    # Detect pre-run tamper
     if model_sha_actual != model.sha256:
         model.status = "tampered"
         await db.commit()
@@ -141,7 +132,6 @@ async def run_inference(
     output = _run_onnx_inference(model_path, image_bytes)
     confidence = output.get("top_confidence", 0.0)
 
-    # Write evidence record to disk
     INFERENCE_STORE.mkdir(parents=True, exist_ok=True)
     inference_id = str(uuid.uuid4())
     evidence = {
@@ -185,7 +175,6 @@ async def run_inference(
         status=inference.status,
     )
 
-
 @router.get("/{inference_id}", response_model=InferenceOut)
 async def get_inference(inference_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Inference).where(Inference.id == inference_id))
@@ -203,7 +192,6 @@ async def get_inference(inference_id: str, db: AsyncSession = Depends(get_db)):
         status=inf.status,
     )
 
-
 @router.post("/{inference_id}/reverify", response_model=ReverifyOut)
 async def reverify_inference(inference_id: str, db: AsyncSession = Depends(get_db)):
     """
@@ -215,7 +203,6 @@ async def reverify_inference(inference_id: str, db: AsyncSession = Depends(get_d
     if not inf:
         raise HTTPException(status_code=404, detail="Inference not found")
 
-    # Load the evidence record from disk
     evidence_path = INFERENCE_STORE / f"{inference_id}.json"
     if not evidence_path.exists():
         raise HTTPException(status_code=404, detail="Evidence record missing from storage")
@@ -223,7 +210,6 @@ async def reverify_inference(inference_id: str, db: AsyncSession = Depends(get_d
     evidence = json.loads(evidence_path.read_text())
     recorded_model_sha = evidence.get("model_sha256")
 
-    # Get the model
     m_result = await db.execute(select(Model).where(Model.id == inf.model_id))
     model = m_result.scalar_one_or_none()
     if not model:
@@ -241,8 +227,6 @@ async def reverify_inference(inference_id: str, db: AsyncSession = Depends(get_d
     else:
         diffs.append("model file missing from storage")
 
-    # input hash — we can't re-hash the original input (it's not stored), but we compare the DB record
-    # In a real system the input would be stored too; here we just check the record is intact
     input_hash_match = (inf.input_sha256 == evidence.get("input_sha256"))
     if not input_hash_match:
         diffs.append("input_sha256 mismatch between DB record and evidence file")

@@ -12,7 +12,6 @@ router = APIRouter()
 
 _clients: set[WebSocket] = set()
 
-
 async def broadcast(payload: dict[str, Any]) -> None:
     """Send a JSON message to every connected WebSocket client."""
     if not _clients:
@@ -26,14 +25,12 @@ async def broadcast(payload: dict[str, Any]) -> None:
             dead.add(ws)
     _clients.difference_update(dead)
 
-
 @router.websocket("/ws/status")
 async def ws_status(websocket: WebSocket):
     await websocket.accept()
     _clients.add(websocket)
     try:
         while True:
-            # keep the socket alive; we only ever send, never receive
             await asyncio.sleep(30)
             await websocket.send_text('{"type":"ping"}')
     except WebSocketDisconnect:

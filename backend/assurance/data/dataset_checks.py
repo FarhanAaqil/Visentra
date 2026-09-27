@@ -34,13 +34,7 @@ try:
 except ImportError:
     HAS_SKLEARN = False
 
-
-# ---------------------------------------------------------------------------
-# Near-duplicate detection
-# ---------------------------------------------------------------------------
-
-HAMMING_THRESHOLD = 8   # perceptual hash distance ≤ this → near-duplicate
-
+HAMMING_THRESHOLD = 8
 
 def _phash(image_path: Path) -> str | None:
     if not HAS_IMAGEHASH:
@@ -50,7 +44,6 @@ def _phash(image_path: Path) -> str | None:
         return str(imagehash.phash(img))
     except Exception:
         return None
-
 
 def find_near_duplicates(image_paths: list[Path]) -> list[dict[str, Any]]:
     """
@@ -80,11 +73,6 @@ def find_near_duplicates(image_paths: list[Path]) -> list[dict[str, Any]]:
                 })
     return pairs
 
-
-# ---------------------------------------------------------------------------
-# OOD / anomaly scoring via embeddings
-# ---------------------------------------------------------------------------
-
 def _extract_embedding(image_path: Path) -> np.ndarray | None:
     """
     Extract a lightweight 512-dim embedding using a pre-built
@@ -97,7 +85,6 @@ def _extract_embedding(image_path: Path) -> np.ndarray | None:
             if img is None:
                 return None
             img = cv2.resize(img, (64, 64))
-            # 3-channel histogram, 32 bins each → 96-dim
             hist = np.concatenate([
                 cv2.calcHist([img], [c], None, [32], [0, 256]).flatten()
                 for c in range(3)
@@ -108,7 +95,6 @@ def _extract_embedding(image_path: Path) -> np.ndarray | None:
             return None
 
     if HAS_IMAGEHASH:
-        # Fallback: use the phash bits as a 64-dim binary vector
         try:
             img = Image.open(image_path).convert("RGB")
             h = imagehash.phash(img, hash_size=8)
@@ -118,7 +104,6 @@ def _extract_embedding(image_path: Path) -> np.ndarray | None:
             return None
 
     return None
-
 
 def score_ood(image_paths: list[Path]) -> list[dict[str, Any]]:
     """
@@ -143,16 +128,14 @@ def score_ood(image_paths: list[Path]) -> list[dict[str, Any]]:
 
     if HAS_SKLEARN and len(X) >= 5:
         clf = IsolationForest(contamination=0.1, random_state=42)
-        scores = clf.fit_predict(X)  # -1 = anomaly, 1 = normal
-        raw_scores = clf.score_samples(X)   # lower = more anomalous
-        # Normalise to 0–1 (higher = more anomalous)
+        scores = clf.fit_predict(X)
+        raw_scores = clf.score_samples(X)
         min_s, max_s = raw_scores.min(), raw_scores.max()
         if max_s > min_s:
             normalized = 1.0 - (raw_scores - min_s) / (max_s - min_s)
         else:
             normalized = np.zeros(len(raw_scores))
     else:
-        # Mahalanobis distance fallback when sklearn not available or too few samples
         centroid = X.mean(axis=0)
         dists = np.linalg.norm(X - centroid, axis=1)
         max_d = dists.max()
@@ -172,7 +155,6 @@ def score_ood(image_paths: list[Path]) -> list[dict[str, Any]]:
     results.sort(key=lambda r: r["anomaly_score"], reverse=True)
     return results
 
-
 def _synthetic_ood(image_paths: list[Path]) -> list[dict[str, Any]]:
     """Deterministic synthetic OOD scores for demo without real images."""
     import random
@@ -181,7 +163,7 @@ def _synthetic_ood(image_paths: list[Path]) -> list[dict[str, Any]]:
     for i, p in enumerate(image_paths):
         score = rng.uniform(0.0, 0.3)
         if i == 0:
-            score = 0.87   # first image is always the "OOD outlier" in the demo
+            score = 0.87
         results.append({
             "image": str(p),
             "anomaly_score": round(score, 4),

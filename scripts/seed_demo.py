@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 VISENTRA Demo Seed Script
 =========================
@@ -36,10 +35,6 @@ if hasattr(sys.stdout, "reconfigure"):
 
 BASE_URL = os.getenv("VISENTRA_API", "http://localhost:8000")
 
-# ---------------------------------------------------------------------------
-# HTTP helpers (no requests dependency)
-# ---------------------------------------------------------------------------
-
 def _post_json(path: str, payload: dict) -> dict:
     data = json.dumps(payload).encode()
     req = urllib.request.Request(
@@ -50,7 +45,6 @@ def _post_json(path: str, payload: dict) -> dict:
     )
     with urllib.request.urlopen(req, timeout=30) as r:
         return json.loads(r.read())
-
 
 def _post_multipart(path: str, fields: dict, files: dict) -> dict:
     """Minimal multipart/form-data POST without external libraries."""
@@ -68,7 +62,6 @@ def _post_multipart(path: str, fields: dict, files: dict) -> dict:
         )
         body_parts[-1] = body_parts[-1].encode() + content_bytes
 
-    # Build body
     body = b""
     for part in body_parts:
         if isinstance(part, str):
@@ -86,11 +79,6 @@ def _post_multipart(path: str, fields: dict, files: dict) -> dict:
     with urllib.request.urlopen(req, timeout=60) as r:
         return json.loads(r.read())
 
-
-# ---------------------------------------------------------------------------
-# Synthetic asset generators
-# ---------------------------------------------------------------------------
-
 def _make_png_image(r: int, g: int, b: int, size: int = 64) -> bytes:
     """Generate a minimal valid 64x64 solid-colour PNG in pure Python."""
     import zlib, struct
@@ -107,7 +95,6 @@ def _make_png_image(r: int, g: int, b: int, size: int = 64) -> bytes:
     iend = chunk(b"IEND", b"")
     return header + ihdr + idat + iend
 
-
 def _make_tiny_onnx() -> bytes:
     """
     Create a minimal ONNX model (MatMul on random weights → 1000 logits).
@@ -117,21 +104,12 @@ def _make_tiny_onnx() -> bytes:
     Falls back to random bytes if protobuf encoding gets too complex;
     the backend handles non-ONNX files gracefully with synthetic inference.
     """
-    # We'll write a random bytes file and let the backend's synthetic
-    # fallback handle it. A real onnx model requires too many dependencies
-    # to generate from scratch in a seed script.
     return os.urandom(4096)
-
-
-# ---------------------------------------------------------------------------
-# Seed main
-# ---------------------------------------------------------------------------
 
 def main():
     print("VISENTRA Demo Seed")
     print("=" * 40)
 
-    # Health check
     try:
         with urllib.request.urlopen(f"{BASE_URL}/health", timeout=5) as r:
             status = json.loads(r.read())
@@ -141,19 +119,15 @@ def main():
         print("  Start the backend first: uvicorn backend.main:app --reload")
         sys.exit(1)
 
-    # 1. Create contributor
     print("\n[1] Creating contributor…")
     contributor = _post_json("/contributors", {"name": "VISENTRA Demo"})
     cid = contributor["id"]
     print(f"  contributor_id = {cid}")
 
-    # 2. Build synthetic dataset (10 coloured PNG images)
     print("\n[2] Building synthetic dataset (10 images)…")
     rng = random.Random(42)
     images_tar = io.BytesIO()
 
-    # Pack all images into a simple tar-like bundle (just concatenated PNGs for demo)
-    # Actually we'll zip them up
     import zipfile
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -174,7 +148,6 @@ def main():
     print(f"  dataset_id = {did}")
     print(f"  sha256     = {dataset['sha256'][:16]}…")
 
-    # 3. Upload synthetic model
     print("\n[3] Uploading synthetic model…")
     model_bytes = _make_tiny_onnx()
     model = _post_multipart(
@@ -186,7 +159,6 @@ def main():
     print(f"  model_id = {mid}")
     print(f"  sha256   = {model['sha256'][:16]}…")
 
-    # 4. Run backdoor scan
     print("\n[4] Running backdoor scan (will use synthetic fallback)…")
     scan = _post_json(f"/models/{mid}/backdoor-scan", {})
     print(f"  scan status     = {scan['status']}")
@@ -196,7 +168,6 @@ def main():
         top = scan["findings"][0]
         print(f"  top trigger     = {top['trigger_type']} (conf={top['confidence']:.2f})")
 
-    # 5. Summary
     print("\n" + "=" * 40)
     print("DEMO SEED COMPLETE")
     print(f"  Contributor ID : {cid}")
@@ -217,7 +188,6 @@ def main():
 
     ids = {"contributor_id": cid, "dataset_id": did, "model_id": mid}
     Path("scripts/demo_ids.json").write_text(json.dumps(ids, indent=2))
-
 
 if __name__ == "__main__":
     main()

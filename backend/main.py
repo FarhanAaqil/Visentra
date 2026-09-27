@@ -2,7 +2,6 @@ import sys
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-# Allow running uvicorn from either repo root or inside backend/
 _root = str(Path(__file__).resolve().parent.parent)
 if _root not in sys.path:
     sys.path.insert(0, _root)
@@ -24,13 +23,11 @@ from backend.api.dataset_assurance import router as dataset_assurance_router
 from backend.api.report import router as report_router
 from backend.api.ws import router as ws_router
 
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield
-
 
 app = FastAPI(
     title="VISENTRA",
@@ -57,7 +54,6 @@ app.include_router(backdoor_router)
 app.include_router(inference_router)
 app.include_router(dataset_assurance_router)
 app.include_router(report_router)
-
 
 @app.get("/health")
 async def health():

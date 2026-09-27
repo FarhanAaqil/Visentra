@@ -9,24 +9,20 @@ from backend.db.models import Contributor, Dataset, Model, Inference
 
 router = APIRouter(prefix="/chain", tags=["chain"])
 
-
 class NodeOut(BaseModel):
     id: str
-    type: str   # "contributor" | "dataset" | "model" | "inference"
+    type: str
     label: str
     status: str | None = None
     meta: dict = {}
-
 
 class EdgeOut(BaseModel):
     source: str
     target: str
 
-
 class ChainOut(BaseModel):
     nodes: list[NodeOut]
     edges: list[EdgeOut]
-
 
 @router.get("/{contributor_id}", response_model=ChainOut)
 async def get_chain(contributor_id: str, db: AsyncSession = Depends(get_db)):
@@ -39,10 +35,8 @@ async def get_chain(contributor_id: str, db: AsyncSession = Depends(get_db)):
     nodes: list[NodeOut] = []
     edges: list[EdgeOut] = []
 
-    # Contributor node
     nodes.append(NodeOut(id=contributor.id, type="contributor", label=contributor.name))
 
-    # Datasets
     ds_result = await db.execute(select(Dataset).where(Dataset.contributor_id == contributor_id))
     datasets = ds_result.scalars().all()
     for ds in datasets:
@@ -52,7 +46,6 @@ async def get_chain(contributor_id: str, db: AsyncSession = Depends(get_db)):
         ))
         edges.append(EdgeOut(source=contributor.id, target=ds.id))
 
-    # Models + Inferences eager loaded in a single batch query (No N+1)
     m_result = await db.execute(
         select(Model)
         .where(Model.contributor_id == contributor_id)

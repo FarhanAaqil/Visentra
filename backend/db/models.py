@@ -8,14 +8,11 @@ from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
 
-
 def _uuid() -> str:
     return str(uuid.uuid4())
 
-
 def _now() -> datetime.datetime:
     return datetime.datetime.utcnow()
-
 
 class Contributor(Base):
     __tablename__ = "contributor"
@@ -27,7 +24,6 @@ class Contributor(Base):
     datasets = relationship("Dataset", back_populates="contributor")
     models = relationship("Model", back_populates="contributor")
 
-
 class Dataset(Base):
     __tablename__ = "dataset"
 
@@ -35,14 +31,12 @@ class Dataset(Base):
     contributor_id = Column(UUID(as_uuid=False), ForeignKey("contributor.id"), nullable=False, index=True)
     version = Column(String(64), nullable=False)
     sha256 = Column(String(64), nullable=False, index=True)
-    # "pending" | "verified" | "flagged" | "tampered"
     status = Column(String(32), default="pending", index=True)
     created_at = Column(DateTime, default=_now)
 
     contributor = relationship("Contributor", back_populates="datasets")
     samples = relationship("DatasetSample", back_populates="dataset")
     findings = relationship("Finding", primaryjoin="and_(Finding.artifact_type=='dataset', foreign(Finding.artifact_id)==Dataset.id)")
-
 
 class DatasetSample(Base):
     __tablename__ = "dataset_sample"
@@ -59,24 +53,21 @@ class DatasetSample(Base):
 
     dataset = relationship("Dataset", back_populates="samples")
 
-
 class Model(Base):
     __tablename__ = "model"
 
     id = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
     contributor_id = Column(UUID(as_uuid=False), ForeignKey("contributor.id"), nullable=False, index=True)
     version = Column(String(64), nullable=False)
-    framework = Column(String(32), nullable=False)  # "onnx" | "pytorch"
+    framework = Column(String(32), nullable=False)
     sha256 = Column(String(64), nullable=False, index=True)
     arch_fingerprint = Column(String(256))
-    # "pending" | "verified" | "suspicious" | "tampered"
     status = Column(String(32), default="pending", index=True)
     created_at = Column(DateTime, default=_now)
 
     contributor = relationship("Contributor", back_populates="models")
     inferences = relationship("Inference", back_populates="model")
     backdoor_findings = relationship("BackdoorFinding", back_populates="model")
-
 
 class BackdoorFinding(Base):
     __tablename__ = "backdoor_finding"
@@ -89,11 +80,10 @@ class BackdoorFinding(Base):
     anomaly_index = Column(Float)
     cluster_score = Column(Float)
     confidence = Column(Float, index=True)
-    evidence_ref = Column(Text)  # JSON blob or file path
+    evidence_ref = Column(Text)
     created_at = Column(DateTime, default=_now)
 
     model = relationship("Model", back_populates="backdoor_findings")
-
 
 class Inference(Base):
     __tablename__ = "inference"
@@ -109,11 +99,9 @@ class Inference(Base):
     confidence = Column(Float)
     timestamp = Column(DateTime, default=_now, index=True)
     signature = Column(Text)
-    # "ok" | "tampered" | "mismatch"
     status = Column(String(32), default="ok", index=True)
 
     model = relationship("Model", back_populates="inferences")
-
 
 class Finding(Base):
     __tablename__ = "finding"
@@ -123,15 +111,12 @@ class Finding(Base):
     )
 
     id = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
-    # "dataset" | "model" | "inference"
     artifact_type = Column(String(32), nullable=False, index=True)
     artifact_id = Column(UUID(as_uuid=False), nullable=False, index=True)
     check_type = Column(String(64), nullable=False)
     evidence_json = Column(JSON)
-    # "info" | "warning" | "critical"
     severity = Column(String(16), default="info")
     created_at = Column(DateTime, default=_now, index=True)
-
 
 class AuditLog(Base):
     __tablename__ = "audit_log"

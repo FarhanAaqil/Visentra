@@ -1,19 +1,24 @@
 :root {
-  --bg: #0a0c10;
-  --surface: #111520;
-  --surface2: #161b27;
-  --border: #1e2535;
-  --accent: #4f8ef7;
-  --accent-hover: #6ba3ff;
-  --success: #22c55e;
-  --warning: #f59e0b;
-  --danger: #ef4444;
-  --suspicious: #a855f7;
-  --muted: #6b7280;
-  --text: #e2e8f0;
-  --text-dim: #94a3b8;
-  --radius: 10px;
-  --font: 'Inter', system-ui, sans-serif;
+  --bg-base: #F7F5F0;
+  --bg-surface: #FFFFFF;
+  --bg-sunken: #EDEAE2;
+  --ink-900: #171512;
+  --ink-600: #5B5750;
+  --ink-400: #8C877D;
+  --rule: #DCD8CC;
+  --rule-strong: #B8B2A2;
+  --accent-ink: #1E1B16;
+
+  --state-verified: #2C6E49;
+  --state-verified-bg: #E7F0E9;
+  --state-suspicious: #B5730A;
+  --state-suspicious-bg: #F7EBD9;
+  --state-tampered: #A32E2E;
+  --state-tampered-bg: #F5E1E1;
+  --state-pending: #5B5750;
+
+  --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: 'IBM Plex Mono', 'JetBrains Mono', SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 * {
@@ -24,16 +29,43 @@
 
 html, body, #root {
   height: 100%;
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--font);
+  width: 100%;
+  background: var(--bg-base);
+  color: var(--ink-900);
+  font-family: var(--font-ui);
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
 }
 
-a { color: var(--accent); text-decoration: none; }
-a:hover { color: var(--accent-hover); }
+a {
+  color: inherit;
+  text-decoration: none;
+}
 
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: var(--surface); }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+button {
+  font-family: inherit;
+  border-radius: 2px;
+}
+
+input, select {
+  font-family: inherit;
+  border-radius: 2px;
+}
+
+code, pre, .mono {
+  font-family: var(--font-mono);
+}
+
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-sunken);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--rule-strong);
+}

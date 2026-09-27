@@ -24,14 +24,12 @@ router = APIRouter(tags=["backdoor"])
 MODEL_STORE = Path(settings.storage_root) / "models"
 EVIDENCE_STORE = Path(settings.storage_root) / "evidence"
 
-
 class ScanResult(BaseModel):
     scan_id: str
     model_id: str
-    status: str          # "clean" | "suspicious" | "error"
+    status: str
     findings: list[dict]
     top_confidence: float
-
 
 class FindingOut(BaseModel):
     id: str
@@ -45,7 +43,6 @@ class FindingOut(BaseModel):
     evidence_ref: str | None
     created_at: str
 
-
 @router.post("/models/{model_id}/backdoor-scan", response_model=ScanResult)
 async def start_backdoor_scan(model_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Model).where(Model.id == model_id))
@@ -55,9 +52,6 @@ async def start_backdoor_scan(model_id: str, db: AsyncSession = Depends(get_db))
 
     model_path = MODEL_STORE / model.sha256
 
-    # Gather any uploaded sample images from the dataset store for this scan
-    # For now: use any .jpg/.png files found in storage as test images.
-    # In Phase 4 this will use proper DatasetSample records.
     dataset_store = Path(settings.storage_root) / "datasets"
     sample_images: list[Path] = []
     if dataset_store.exists():
@@ -66,7 +60,6 @@ async def start_backdoor_scan(model_id: str, db: AsyncSession = Depends(get_db))
             if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp"}
         ][:20]
 
-    # Run the scan (sync — fast enough for demo; Phase 5 moves to celery/background)
     try:
         findings_raw = run_backdoor_scan(model_path, sample_images)
     except Exception as e:
@@ -76,7 +69,6 @@ async def start_backdoor_scan(model_id: str, db: AsyncSession = Depends(get_db))
     scan_id = str(uuid.uuid4())
     top_confidence = max((f["confidence"] for f in findings_raw), default=0.0)
 
-    # Persist each finding to DB
     for f in findings_raw:
         evidence_path = EVIDENCE_STORE / f"{scan_id}_{f['trigger_type']}.json"
         evidence_path.write_text(json.dumps(f["evidence"], indent=2))
@@ -93,7 +85,6 @@ async def start_backdoor_scan(model_id: str, db: AsyncSession = Depends(get_db))
         )
         db.add(finding)
 
-    # Update model status
     new_status = "suspicious" if top_confidence >= 0.3 else "verified"
     model.status = new_status
     await db.commit()
@@ -114,7 +105,6 @@ async def start_backdoor_scan(model_id: str, db: AsyncSession = Depends(get_db))
         findings=findings_raw,
         top_confidence=top_confidence,
     )
-
 
 @router.get("/models/{model_id}/backdoor-findings", response_model=list[FindingOut])
 async def get_backdoor_findings(model_id: str, db: AsyncSession = Depends(get_db)):

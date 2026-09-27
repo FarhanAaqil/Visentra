@@ -20,7 +20,6 @@ router = APIRouter(prefix="/demo", tags=["demo"])
 MODEL_STORE = Path(settings.storage_root) / "models"
 DATASET_STORE = Path(settings.storage_root) / "datasets"
 
-
 @router.post("/models/{model_id}/tamper")
 async def tamper_model(model_id: str, db: AsyncSession = Depends(get_db)):
     """Overwrite the stored model file with random bytes. Call /models/{id}/verify after to see the node go red."""
@@ -33,11 +32,9 @@ async def tamper_model(model_id: str, db: AsyncSession = Depends(get_db)):
     if not stored.exists():
         raise HTTPException(status_code=404, detail="Stored model file not found")
 
-    # Overwrite with 1 KB of random garbage
     stored.write_bytes(os.urandom(1024))
 
     return {"detail": "Model file tampered. Call /models/{id}/verify to detect the change."}
-
 
 @router.post("/datasets/{dataset_id}/tamper")
 async def tamper_dataset(dataset_id: str, db: AsyncSession = Depends(get_db)):
@@ -54,7 +51,6 @@ async def tamper_dataset(dataset_id: str, db: AsyncSession = Depends(get_db)):
     stored.write_bytes(os.urandom(1024))
 
     return {"detail": "Dataset file tampered. Call /datasets/{id}/verify to detect the change."}
-
 
 @router.post("/models/{model_id}/restore")
 async def restore_model(model_id: str, db: AsyncSession = Depends(get_db)):

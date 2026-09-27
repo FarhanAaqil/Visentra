@@ -23,7 +23,6 @@ router = APIRouter(tags=["dataset-assurance"])
 
 DATASET_STORE = Path(settings.storage_root) / "datasets"
 
-
 def _collect_images(dataset_id: str, sample_paths: list[str]) -> list[Path]:
     """Resolve sample paths and filter to supported image extensions."""
     images = []
@@ -31,14 +30,12 @@ def _collect_images(dataset_id: str, sample_paths: list[str]) -> list[Path]:
         p = Path(sp)
         if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp"} and p.exists():
             images.append(p)
-    # Fallback: scan the dataset store directory if no samples registered
     if not images and DATASET_STORE.exists():
         images = [
             p for p in DATASET_STORE.rglob("*")
             if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp"}
         ][:50]
     return images
-
 
 class AnalysisOut(BaseModel):
     dataset_id: str
@@ -48,7 +45,6 @@ class AnalysisOut(BaseModel):
     total_samples_checked: int
     findings: list[dict]
 
-
 @router.post("/datasets/{dataset_id}/analyze", response_model=AnalysisOut)
 async def analyze_dataset(dataset_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Dataset).where(Dataset.id == dataset_id))
@@ -56,7 +52,6 @@ async def analyze_dataset(dataset_id: str, db: AsyncSession = Depends(get_db)):
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
 
-    # Load sample paths from DB
     s_result = await db.execute(select(DatasetSample).where(DatasetSample.dataset_id == dataset_id))
     samples = s_result.scalars().all()
     sample_paths = [s.path for s in samples]
@@ -64,7 +59,6 @@ async def analyze_dataset(dataset_id: str, db: AsyncSession = Depends(get_db)):
 
     all_findings = []
 
-    # 1. Near-duplicate detection
     dup_pairs = find_near_duplicates(images)
     for pair in dup_pairs:
         finding = Finding(
@@ -77,7 +71,6 @@ async def analyze_dataset(dataset_id: str, db: AsyncSession = Depends(get_db)):
         db.add(finding)
         all_findings.append({"check": "near_duplicate", **pair})
 
-    # 2. OOD scoring
     ood_results = score_ood(images)
     ood_flagged = [r for r in ood_results if r.get("flag") == "ood"]
     for r in ood_flagged:
@@ -91,7 +84,6 @@ async def analyze_dataset(dataset_id: str, db: AsyncSession = Depends(get_db)):
         db.add(finding)
         all_findings.append({"check": "ood_anomaly", **r})
 
-    # Update dataset status
     if dup_pairs or ood_flagged:
         dataset.status = "flagged"
     else:
@@ -114,7 +106,6 @@ async def analyze_dataset(dataset_id: str, db: AsyncSession = Depends(get_db)):
         findings=all_findings,
     )
 
-
 class FindingOut(BaseModel):
     id: str
     check_type: str
@@ -122,11 +113,9 @@ class FindingOut(BaseModel):
     severity: str
     created_at: str
 
-
 from io import BytesIO
 from PIL import Image
 from fastapi.responses import Response
-
 
 @router.get("/datasets/{dataset_id}/thumbnail")
 async def get_dataset_thumbnail(
@@ -142,7 +131,6 @@ async def get_dataset_thumbnail(
     """
     img_path = Path(path) if path else None
     if not img_path or not img_path.exists():
-        # Fallback preview tile
         img = Image.new("RGB", (size, size), color=(24, 30, 42))
     else:
         try:
@@ -160,7 +148,6 @@ async def get_dataset_thumbnail(
         media_type="image/jpeg",
         headers={"Cache-Control": "public, max-age=86400"},
     )
-
 
 @router.get("/datasets/{dataset_id}/findings", response_model=list[FindingOut])
 async def get_dataset_findings(dataset_id: str, db: AsyncSession = Depends(get_db)):
@@ -181,5 +168,4 @@ async def get_dataset_findings(dataset_id: str, db: AsyncSession = Depends(get_d
         )
         for f in findings
     ]
-
 

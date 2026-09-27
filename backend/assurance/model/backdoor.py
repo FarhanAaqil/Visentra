@@ -27,7 +27,6 @@ from typing import Any
 
 import numpy as np
 
-# Optional heavy imports — gracefully degrade if not installed
 try:
     import cv2
     HAS_CV2 = True
@@ -46,11 +45,6 @@ try:
 except ImportError:
     HAS_PIL = False
 
-
-# ---------------------------------------------------------------------------
-# Trigger library — each trigger is a function (img: np.ndarray) -> np.ndarray
-# ---------------------------------------------------------------------------
-
 def _checkerboard(img: np.ndarray, size: int = 16, x: int = 0, y: int = 0) -> np.ndarray:
     out = img.copy()
     for i in range(size):
@@ -61,14 +55,12 @@ def _checkerboard(img: np.ndarray, size: int = 16, x: int = 0, y: int = 0) -> np
                 out[oy, ox] = [col, col, col]
     return out
 
-
 def _colored_square(img: np.ndarray, color: tuple[int, int, int], size: int = 12, x: int = 0, y: int = 0) -> np.ndarray:
     out = img.copy()
     h, w = out.shape[:2]
     y2, x2 = min(y + size, h), min(x + size, w)
     out[y:y2, x:x2] = color
     return out
-
 
 def _small_cross(img: np.ndarray, size: int = 10, x: int = 0, y: int = 0) -> np.ndarray:
     out = img.copy()
@@ -79,7 +71,6 @@ def _small_cross(img: np.ndarray, size: int = 10, x: int = 0, y: int = 0) -> np.
                 out[oy, ox] = [255, 0, 0]
     return out
 
-
 TRIGGERS = [
     ("checkerboard_16px", lambda img, x, y: _checkerboard(img, 16, x, y)),
     ("red_square_12px",   lambda img, x, y: _colored_square(img, (255, 0, 0), 12, x, y)),
@@ -89,19 +80,13 @@ TRIGGERS = [
 
 POSITIONS = ["top-left", "top-right", "bottom-left", "bottom-right", "center"]
 
-
 def _pos_to_xy(pos: str, h: int, w: int, patch: int = 16) -> tuple[int, int]:
     margin = 4
     if pos == "top-left":     return margin, margin
     if pos == "top-right":    return w - patch - margin, margin
     if pos == "bottom-left":  return margin, h - patch - margin
     if pos == "bottom-right": return w - patch - margin, h - patch - margin
-    return w // 2 - patch // 2, h // 2 - patch // 2   # center
-
-
-# ---------------------------------------------------------------------------
-# ONNX inference helper
-# ---------------------------------------------------------------------------
+    return w // 2 - patch // 2, h // 2 - patch // 2
 
 def _load_onnx_session(model_path: Path):
     if not HAS_ORT:
@@ -109,37 +94,28 @@ def _load_onnx_session(model_path: Path):
     sess = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
     return sess
 
-
 def _preprocess(img_bgr: np.ndarray, input_shape: tuple) -> np.ndarray:
     """Resize + normalize to match common ONNX CV model input (NCHW float32)."""
-    _, _, h, w = input_shape  # (N, C, H, W)
+    _, _, h, w = input_shape
     resized = cv2.resize(img_bgr, (w, h))
     rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
-    # ImageNet normalization
     mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
     std  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
     normalized = (rgb - mean) / std
     chw = normalized.transpose(2, 0, 1)
-    return chw[np.newaxis, ...]   # (1, C, H, W)
-
+    return chw[np.newaxis, ...]
 
 def _run_onnx(sess, img_bgr: np.ndarray) -> tuple[int, float]:
     """Returns (predicted_class, confidence)."""
     input_name = sess.get_inputs()[0].name
-    input_shape = sess.get_inputs()[0].shape  # may contain None/dynamic dims
-    # Default to 224x224 if dynamic
+    input_shape = sess.get_inputs()[0].shape
     shape = tuple(d if isinstance(d, int) and d > 0 else 224 for d in input_shape)
     x = _preprocess(img_bgr, shape if len(shape) == 4 else (1, 3, 224, 224))
-    out = sess.run(None, {input_name: x})[0]  # (1, num_classes)
+    out = sess.run(None, {input_name: x})[0]
     logits = out[0]
     probs = np.exp(logits - logits.max()) / np.exp(logits - logits.max()).sum()
     cls = int(np.argmax(probs))
     return cls, float(probs[cls])
-
-
-# ---------------------------------------------------------------------------
-# Main scan function
-# ---------------------------------------------------------------------------
 
 def run_backdoor_scan(
     model_path: Path,
@@ -158,14 +134,12 @@ def run_backdoor_scan(
     try:
         sess = _load_onnx_session(model_path)
     except Exception as e:
-        # Fall back to synthetic results for non-ONNX or broken models
         return _synthetic_scan(sample_images, reason=str(e))
 
     images = sample_images[:max_samples]
     if not images:
         return []
 
-    # Load images
     loaded = []
     for p in images:
         img = cv2.imread(str(p))
@@ -175,7 +149,6 @@ def run_backdoor_scan(
     if not loaded:
         return _synthetic_scan(sample_images)
 
-    # Baseline predictions (clean images)
     baseline: dict[str, tuple[int, float]] = {}
     for path, img in loaded:
         try:
@@ -220,7 +193,6 @@ def run_backdoor_scan(
         dominant_count = target_votes[dominant_class]
         dominant_fraction = dominant_count / len(flips) if flips else 0.0
 
-        # Anomaly index: how much the trigger magnifies confidence vs baseline
         triggered_confs = [f["triggered_confidence"] for f in flips]
         baseline_confs  = [baseline[p][1] for p, _ in loaded if p in baseline]
         if triggered_confs and baseline_confs:
@@ -232,7 +204,6 @@ def run_backdoor_scan(
 
         confidence = round(0.6 * consistency_rate * dominant_fraction + 0.4 * anomaly_index, 4)
 
-        # Only report triggers above noise floor
         if confidence < 0.05:
             continue
 
@@ -245,19 +216,13 @@ def run_backdoor_scan(
             "confidence": confidence,
             "evidence": {
                 "total_pairs_tested": total_pairs,
-                "flips": flips[:10],  # store first 10 for evidence record
+                "flips": flips[:10],
                 "target_class_votes": target_votes,
             },
         })
 
     findings.sort(key=lambda f: f["confidence"], reverse=True)
     return findings
-
-
-# ---------------------------------------------------------------------------
-# Synthetic fallback (used when onnxruntime / cv2 / images not available)
-# Produces realistic-looking results for demo/testing without real model.
-# ---------------------------------------------------------------------------
 
 def _synthetic_scan(
     sample_images: list[Path],
@@ -277,7 +242,6 @@ def _synthetic_scan(
         confidence       = round(0.6 * consistency_rate + 0.4 * anomaly_index, 4)
 
         if trigger_name == "checkerboard_16px":
-            # Make this one look highly suspicious for the demo
             consistency_rate = 0.91
             anomaly_index    = 0.78
             confidence       = round(0.6 * 0.91 + 0.4 * 0.78, 4)

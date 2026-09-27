@@ -16,11 +16,10 @@ export function useStatusSocket(onMessage: Handler) {
       try {
         const msg = JSON.parse(ev.data)
         if (msg.type !== 'ping') cb.current(msg)
-      } catch { /* ignore */ }
+      } catch {}
     }
 
     socket.onclose = () => {
-      // reconnect after 2 s
       setTimeout(connect, 2000)
     }
   }, [])
