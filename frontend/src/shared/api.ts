@@ -25,6 +25,9 @@ export const uploadDataset = (contributorId: string, version: string, file: File
 export const verifyDataset = (id: string) =>
   api.post(`/datasets/${id}/verify`).then(r => r.data)
 
+export const tamperDataset = (id: string) =>
+  api.post(`/demo/datasets/${id}/tamper`).then(r => r.data)
+
 // --- models ---
 export const uploadModel = (contributorId: string, version: string, file: File) => {
   const fd = new FormData()
@@ -36,6 +39,12 @@ export const uploadModel = (contributorId: string, version: string, file: File) 
 
 export const verifyModel = (id: string) =>
   api.post(`/models/${id}/verify`).then(r => r.data)
+
+export const tamperModel = (id: string) =>
+  api.post(`/demo/models/${id}/tamper`).then(r => r.data)
+
+export const restoreModel = (id: string) =>
+  api.post(`/demo/models/${id}/restore`).then(r => r.data)
 
 // --- chain ---
 export const getChain = (contributorId: string) =>

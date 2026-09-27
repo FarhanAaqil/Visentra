@@ -11,10 +11,12 @@ import {
   Node,
   Edge,
   Connection,
+  NodeMouseHandler,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
 import LineageNode, { LineageNodeData } from './LineageNode'
+import NodePanel from './NodePanel'
 import { getChain } from '../shared/api'
 import { useStatusSocket } from '../shared/useStatusSocket'
 
@@ -24,19 +26,33 @@ interface Props {
   contributorId: string | null
 }
 
-function toFlowNode(n: { id: string; type: string; label: string; status?: string; meta?: Record<string, string> }, index: number): Node {
+function toFlowNode(
+  n: { id: string; type: string; label: string; status?: string; meta?: Record<string, string> },
+  index: number
+): Node {
   return {
     id: n.id,
     type: 'lineage',
-    position: { x: (['contributor', 'dataset', 'model', 'inference'].indexOf(n.type)) * 240, y: index * 90 },
+    position: {
+      x: (['contributor', 'dataset', 'model', 'inference'].indexOf(n.type)) * 260,
+      y: index * 100,
+    },
     data: { nodeType: n.type, label: n.label, status: n.status, meta: n.meta } as LineageNodeData,
   }
+}
+
+interface SelectedNode {
+  id: string
+  nodeType: string
+  label: string
+  status: string | undefined
 }
 
 export default function LineageGraph({ contributorId }: Props) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [loading, setLoading] = useState(false)
+  const [selected, setSelected] = useState<SelectedNode | null>(null)
 
   const onConnect = useCallback((c: Connection) => setEdges(e => addEdge(c, e)), [setEdges])
 
@@ -45,7 +61,12 @@ export default function LineageGraph({ contributorId }: Props) {
     setLoading(true)
     try {
       const data = await getChain(contributorId)
-      setNodes(data.nodes.map((n: { id: string; type: string; label: string; status?: string; meta?: Record<string, string> }, i: number) => toFlowNode(n, i)))
+      setNodes(
+        data.nodes.map(
+          (n: { id: string; type: string; label: string; status?: string; meta?: Record<string, string> }, i: number) =>
+            toFlowNode(n, i)
+        )
+      )
       setEdges(
         data.edges.map((e: { source: string; target: string }, i: number) => ({
           id: `e-${i}`,
@@ -60,25 +81,45 @@ export default function LineageGraph({ contributorId }: Props) {
     }
   }, [contributorId, setNodes, setEdges])
 
-  useEffect(() => { loadChain() }, [loadChain])
+  useEffect(() => {
+    setSelected(null)
+    loadChain()
+  }, [loadChain])
 
-  // Live WebSocket updates — patch the affected node's status in-place
+  // Live WebSocket — patch affected node's status in-place, with a brief pulse animation
   useStatusSocket((msg) => {
     const { id, status } = msg as { id: string; status: string }
     if (!id || !status) return
     setNodes(prev =>
       prev.map(n =>
-        n.id === id
-          ? { ...n, data: { ...n.data, status } }
-          : n
+        n.id === id ? { ...n, data: { ...n.data, status } } : n
       )
+    )
+    // If the selected node was just updated, sync the panel too
+    setSelected(prev =>
+      prev?.id === id ? { ...prev, status } : prev
     )
   })
 
+  const onNodeClick: NodeMouseHandler = useCallback((_event, node) => {
+    const d = node.data as LineageNodeData
+    if (d.nodeType === 'contributor') return // no actions for contributor node
+    setSelected({
+      id: node.id,
+      nodeType: d.nodeType,
+      label: d.label,
+      status: d.status,
+    })
+  }, [])
+
   if (!contributorId) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--muted)' }}>
-        Select or create a contributor to view its lineage graph.
+      <div style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        justifyContent: 'center', height: '100%', gap: 12, color: 'var(--muted)',
+      }}>
+        <span style={{ fontSize: 36 }}>🕸️</span>
+        <span style={{ fontSize: 14 }}>Select or create a contributor to view its lineage graph.</span>
       </div>
     )
   }
@@ -86,16 +127,23 @@ export default function LineageGraph({ contributorId }: Props) {
   return (
     <div style={{ height: '100%', position: 'relative' }}>
       {loading && (
-        <div style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 10, color: 'var(--text-dim)', fontSize: 12 }}>
+        <div style={{
+          position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)',
+          zIndex: 10, color: 'var(--text-dim)', fontSize: 12,
+          background: 'var(--surface)', padding: '4px 12px', borderRadius: 20,
+          border: '1px solid var(--border)',
+        }}>
           Loading chain…
         </div>
       )}
+
       <ReactFlow
         nodes={nodes}
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onNodeClick={onNodeClick}
         nodeTypes={nodeTypes}
         fitView
         proOptions={{ hideAttribution: true }}
@@ -107,6 +155,16 @@ export default function LineageGraph({ contributorId }: Props) {
           nodeColor={() => 'var(--accent)'}
         />
       </ReactFlow>
+
+      {selected && (
+        <NodePanel
+          nodeId={selected.id}
+          nodeType={selected.nodeType}
+          label={selected.label}
+          status={selected.status}
+          onClose={() => setSelected(null)}
+        />
+      )}
     </div>
   )
 }
