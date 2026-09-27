@@ -86,20 +86,37 @@ export default function LineageGraph({ contributorId }: Props) {
     loadChain()
   }, [loadChain])
 
-  // Live WebSocket — patch affected node's status in-place, with a brief pulse animation
-  useStatusSocket((msg) => {
-    const { id, status } = msg as { id: string; status: string }
+  // Live WebSocket — patch ONLY the affected node in-place; bail out if unchanged to prevent DAG re-renders
+  const handleStatusMessage = useCallback((msg: Record<string, unknown>) => {
+    const { id, status } = msg as { id?: string; status?: string }
     if (!id || !status) return
-    setNodes(prev =>
-      prev.map(n =>
-        n.id === id ? { ...n, data: { ...n.data, status } } : n
-      )
-    )
-    // If the selected node was just updated, sync the panel too
-    setSelected(prev =>
-      prev?.id === id ? { ...prev, status } : prev
-    )
-  })
+
+    setNodes(prev => {
+      const idx = prev.findIndex(n => n.id === id)
+      if (idx === -1) return prev // Node not in this graph — zero re-render
+
+      const target = prev[idx]
+      const currentStatus = (target.data as LineageNodeData | undefined)?.status
+      if (currentStatus === status) return prev // Status unchanged — zero re-render
+
+      const next = [...prev]
+      next[idx] = {
+        ...target,
+        data: {
+          ...(target.data as LineageNodeData),
+          status,
+        },
+      }
+      return next
+    })
+
+    setSelected(prev => {
+      if (!prev || prev.id !== id || prev.status === status) return prev
+      return { ...prev, status }
+    })
+  }, [setNodes])
+
+  useStatusSocket(handleStatusMessage)
 
   const onNodeClick: NodeMouseHandler = useCallback((_event, node) => {
     const d = node.data as LineageNodeData

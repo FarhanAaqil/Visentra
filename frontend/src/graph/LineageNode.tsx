@@ -71,4 +71,13 @@ function LineageNode({ data }: NodeProps) {
   )
 }
 
-export default memo(LineageNode)
+export default memo(LineageNode, (prev, next) => {
+  const pData = prev.data as LineageNodeData
+  const nData = next.data as LineageNodeData
+  return (
+    pData.status === nData.status &&
+    pData.label === nData.label &&
+    pData.nodeType === nData.nodeType &&
+    prev.selected === next.selected
+  )
+})

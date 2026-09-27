@@ -52,8 +52,12 @@ async def get_chain(contributor_id: str, db: AsyncSession = Depends(get_db)):
         ))
         edges.append(EdgeOut(source=contributor.id, target=ds.id))
 
-    # Models
-    m_result = await db.execute(select(Model).where(Model.contributor_id == contributor_id))
+    # Models + Inferences eager loaded in a single batch query (No N+1)
+    m_result = await db.execute(
+        select(Model)
+        .where(Model.contributor_id == contributor_id)
+        .options(selectinload(Model.inferences))
+    )
     models = m_result.scalars().all()
     for m in models:
         nodes.append(NodeOut(
@@ -62,10 +66,7 @@ async def get_chain(contributor_id: str, db: AsyncSession = Depends(get_db)):
         ))
         edges.append(EdgeOut(source=contributor.id, target=m.id))
 
-        # Inferences hanging off this model
-        inf_result = await db.execute(select(Inference).where(Inference.model_id == m.id))
-        inferences = inf_result.scalars().all()
-        for inf in inferences:
+        for inf in m.inferences:
             nodes.append(NodeOut(
                 id=inf.id, type="inference", label=f"Inference {inf.id[:8]}…", status=inf.status,
                 meta={"input_sha256": (inf.input_sha256 or "")[:12] + "…"},

@@ -123,6 +123,45 @@ class FindingOut(BaseModel):
     created_at: str
 
 
+from io import BytesIO
+from PIL import Image
+from fastapi.responses import Response
+
+
+@router.get("/datasets/{dataset_id}/thumbnail")
+async def get_dataset_thumbnail(
+    dataset_id: str,
+    path: str = "",
+    size: int = 128,
+    quality: int = 80,
+):
+    """
+    Returns an optimized, compressed thumbnail image.
+    Applies bicubic downscaling, converts to RGB, and compresses to JPEG
+    with quality=80 to guarantee lightweight lazy loading in the UI.
+    """
+    img_path = Path(path) if path else None
+    if not img_path or not img_path.exists():
+        # Fallback preview tile
+        img = Image.new("RGB", (size, size), color=(24, 30, 42))
+    else:
+        try:
+            img = Image.open(img_path)
+            img.thumbnail((size, size), Image.Resampling.LANCZOS)
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+        except Exception:
+            img = Image.new("RGB", (size, size), color=(24, 30, 42))
+
+    buf = BytesIO()
+    img.save(buf, format="JPEG", quality=quality, optimize=True)
+    return Response(
+        content=buf.getvalue(),
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
 @router.get("/datasets/{dataset_id}/findings", response_model=list[FindingOut])
 async def get_dataset_findings(dataset_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
@@ -142,3 +181,5 @@ async def get_dataset_findings(dataset_id: str, db: AsyncSession = Depends(get_d
         )
         for f in findings
     ]
+
+

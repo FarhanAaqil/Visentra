@@ -97,13 +97,14 @@ async def _compute_scores(contributor_id: str, db: AsyncSession) -> tuple[ScoreB
     else:
         bd_score = 0.0  # no models = no score
 
-    # --- Inference ---
+    # --- Inference (batched query, no N+1) ---
     inf_score = 100.0
     all_inferences = []
-    for m in models:
-        inf_result = await db.execute(select(Inference).where(Inference.model_id == m.id))
-        inferences = inf_result.scalars().all()
-        all_inferences.extend(inferences)
+    if model_ids:
+        inf_result = await db.execute(
+            select(Inference).where(Inference.model_id.in_(model_ids))
+        )
+        all_inferences = inf_result.scalars().all()
 
     if all_inferences:
         ok_count = sum(1 for i in all_inferences if i.status == "ok")
