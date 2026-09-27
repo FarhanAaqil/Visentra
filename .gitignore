@@ -43,7 +43,9 @@ Thumbs.db
 *.swo
 
 # Uploads / Storage (local artifact store)
+storage/
 backend/storage/
+scripts/demo_ids.json
 *.onnx
 *.pt
 *.pth
