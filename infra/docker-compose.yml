@@ -1,0 +1,34 @@
+version: '3.9'
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: visentra
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:password@db:5432/visentra
+      STORAGE_ROOT: /app/storage
+      CORS_ORIGINS: '["http://localhost:5173"]'
+    ports:
+      - '8000:8000'
+    volumes:
+      - storage:/app/storage
+
+volumes:
+  pgdata:
+  storage:
