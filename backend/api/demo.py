@@ -33,8 +33,13 @@ async def tamper_model(model_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Stored model file not found")
 
     stored.write_bytes(os.urandom(1024))
+    model.status = "tampered"
+    await db.commit()
 
-    return {"detail": "Model file tampered. Call /models/{id}/verify to detect the change."}
+    from backend.api.ws import broadcast
+    await broadcast({"type": "node_status", "node_type": "model", "id": model_id, "status": "tampered"})
+
+    return {"detail": "Model file tampered. Digest divergence broadcast to live listeners."}
 
 @router.post("/datasets/{dataset_id}/tamper")
 async def tamper_dataset(dataset_id: str, db: AsyncSession = Depends(get_db)):

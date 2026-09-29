@@ -33,7 +33,7 @@ from pathlib import Path
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-BASE_URL = os.getenv("VISENTRA_API", "http://localhost:8000")
+BASE_URL = os.getenv("VISENTRA_API", "http://localhost:8001")
 
 def _post_json(path: str, payload: dict) -> dict:
     data = json.dumps(payload).encode()
@@ -96,14 +96,6 @@ def _make_png_image(r: int, g: int, b: int, size: int = 64) -> bytes:
     return header + ihdr + idat + iend
 
 def _make_tiny_onnx() -> bytes:
-    """
-    Create a minimal ONNX model (MatMul on random weights → 1000 logits).
-    Uses protobuf encoding directly without the onnx package.
-    This produces a file that onnxruntime can load.
-
-    Falls back to random bytes if protobuf encoding gets too complex;
-    the backend handles non-ONNX files gracefully with synthetic inference.
-    """
     return os.urandom(4096)
 
 def main():
@@ -116,7 +108,7 @@ def main():
             print(f"✓ Backend reachable: {status}")
     except Exception as e:
         print(f"✗ Cannot reach backend at {BASE_URL}: {e}")
-        print("  Start the backend first: uvicorn backend.main:app --reload")
+        print("  Start the backend first: uvicorn backend.main:app --port 8001 --reload")
         sys.exit(1)
 
     print("\n[1] Creating contributor…")
@@ -124,17 +116,18 @@ def main():
     cid = contributor["id"]
     print(f"  contributor_id = {cid}")
 
-    print("\n[2] Building synthetic dataset (10 images)…")
+    print("\n[2] Building synthetic dataset (10 images with near-duplicate pair)…")
     rng = random.Random(42)
-    images_tar = io.BytesIO()
 
     import zipfile
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for i in range(10):
-            colour = (rng.randint(0, 255), rng.randint(0, 255), rng.randint(0, 255))
-            png = _make_png_image(*colour)
-            zf.writestr(f"image_{i:02d}.png", png)
+        for i in range(8):
+            colour = (rng.randint(20, 220), rng.randint(20, 220), rng.randint(20, 220))
+            zf.writestr(f"image_{i:02d}.png", _make_png_image(*colour))
+        # Add intentional near-duplicate pair for Pillar I demonstration
+        zf.writestr("image_08_dup_a.png", _make_png_image(190, 45, 45))
+        zf.writestr("image_09_dup_b.png", _make_png_image(190, 46, 45))
 
     dataset_bytes = zip_buf.getvalue()
     print(f"  dataset archive: {len(dataset_bytes)} bytes")
@@ -148,7 +141,16 @@ def main():
     print(f"  dataset_id = {did}")
     print(f"  sha256     = {dataset['sha256'][:16]}…")
 
-    print("\n[3] Uploading synthetic model…")
+    print("\n[3] Running dataset assurance checks (Deduplication + OOD)…")
+    try:
+        ds_analysis = _post_json(f"/datasets/{did}/analyze", {})
+        print(f"  dataset status   = {ds_analysis.get('status')}")
+        print(f"  duplicate pairs  = {ds_analysis.get('duplicate_pairs')}")
+        print(f"  ood flagged      = {ds_analysis.get('ood_flagged')}")
+    except Exception as e:
+        print(f"  (dataset analyze skipped: {e})")
+
+    print("\n[4] Uploading synthetic model…")
     model_bytes = _make_tiny_onnx()
     model = _post_multipart(
         "/models",
@@ -159,7 +161,7 @@ def main():
     print(f"  model_id = {mid}")
     print(f"  sha256   = {model['sha256'][:16]}…")
 
-    print("\n[4] Running backdoor scan (will use synthetic fallback)…")
+    print("\n[5] Running backdoor scan (Trojan candidate detection)…")
     scan = _post_json(f"/models/{mid}/backdoor-scan", {})
     print(f"  scan status     = {scan['status']}")
     print(f"  top confidence  = {scan['top_confidence']:.2f}")
@@ -168,25 +170,42 @@ def main():
         top = scan["findings"][0]
         print(f"  top trigger     = {top['trigger_type']} (conf={top['confidence']:.2f})")
 
+    print("\n[6] Binding inference executions (Pillar IV Cryptographic Binding)…")
+    inf1 = _post_multipart(
+        "/inference",
+        {"model_id": mid, "config": json.dumps({"batch_size": 1, "precision": "fp32"})},
+        {"image": ("query_telemetry_01.png", _make_png_image(40, 160, 220), "image/png")},
+    )
+    print(f"  inference_1 id  = {inf1['id']}")
+    print(f"  confidence      = {inf1.get('confidence', 0.0):.2f}")
+
+    inf2 = _post_multipart(
+        "/inference",
+        {"model_id": mid, "config": json.dumps({"batch_size": 1, "precision": "fp32"})},
+        {"image": ("query_telemetry_02.png", _make_png_image(200, 80, 50), "image/png")},
+    )
+    print(f"  inference_2 id  = {inf2['id']}")
+    print(f"  confidence      = {inf2.get('confidence', 0.0):.2f}")
+
     print("\n" + "=" * 40)
     print("DEMO SEED COMPLETE")
     print(f"  Contributor ID : {cid}")
     print(f"  Dataset ID     : {did}")
     print(f"  Model ID       : {mid}")
+    print(f"  Inference 1    : {inf1['id']}")
+    print(f"  Inference 2    : {inf2['id']}")
     print()
     print("Open the frontend at http://localhost:5173")
     print("Select 'VISENTRA Demo' in the sidebar to see the lineage graph.")
     print()
-    print("Demo script:")
-    print("  1. Graph shows Contributor → Dataset (verified) → Model (suspicious)")
-    print("  2. Click Model node → Verify Integrity → still verified")
-    print("  3. Click Model node → Tamper Demo → node flips red live")
-    print("  4. Click Model node → Backdoor Scan → checkerboard ~85% confidence")
-    print("  5. Click header → Assurance Report → score breakdown + limitations")
-    print()
     print("IDs saved to: scripts/demo_ids.json")
 
-    ids = {"contributor_id": cid, "dataset_id": did, "model_id": mid}
+    ids = {
+        "contributor_id": cid,
+        "dataset_id": did,
+        "model_id": mid,
+        "inference_ids": [inf1["id"], inf2["id"]],
+    }
     Path("scripts/demo_ids.json").write_text(json.dumps(ids, indent=2))
 
 if __name__ == "__main__":
