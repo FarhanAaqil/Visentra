@@ -40,9 +40,7 @@ class Dataset(Base):
 
 class DatasetSample(Base):
     __tablename__ = "dataset_sample"
-    __table_args__ = (
-        Index("ix_dataset_sample_phash", "dataset_id", "phash"),
-    )
+   
 
     id = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
     dataset_id = Column(UUID(as_uuid=False), ForeignKey("dataset.id"), nullable=False, index=True)
