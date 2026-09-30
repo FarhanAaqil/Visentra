@@ -6,82 +6,40 @@ demo script (see VISENTRA_Implementation_Plan.md §7) works every run.
 
 What it does:
   1. Creates a demo contributor "VISENTRA Demo"
-  2. Creates a synthetic 10-image dataset (coloured squares — no real images needed)
-  3. Creates a tiny synthetic ONNX model (identity → random logits)
-  4. Uploads both to the running backend at http://localhost:8000
-  5. Runs a backdoor scan — checkerboard trigger will look highly suspicious
-  6. Prints the IDs for manual use in the demo
+  2. Creates a synthetic 10-image dataset (with near-duplicate pair)
+  3. Runs dataset assurance checks (perceptual hashing & OOD)
+  4. Creates and uploads a synthetic ONNX model
+  5. Runs a backdoor scan — detects trigger candidates
+  6. Binds 2 inference executions with cryptographic signatures
+  7. Saves the IDs to scripts/demo_ids.json
 
-Run:
+Can be run directly via CLI:
     python scripts/seed_demo.py
 
-Reset:
-    Delete the storage/ directory and re-run to get a fresh seed.
+Or imported by the backend for automatic startup seeding:
+    await seed_demo_data(app=app)
 """
 
+import asyncio
 import io
 import json
 import os
 import random
 import struct
 import sys
-import tempfile
-import urllib.request
-import urllib.error
+import zipfile
 from pathlib import Path
+import httpx
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 BASE_URL = os.getenv("VISENTRA_API", "http://localhost:8001")
 
-def _post_json(path: str, payload: dict) -> dict:
-    data = json.dumps(payload).encode()
-    req = urllib.request.Request(
-        f"{BASE_URL}{path}",
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return json.loads(r.read())
-
-def _post_multipart(path: str, fields: dict, files: dict) -> dict:
-    """Minimal multipart/form-data POST without external libraries."""
-    boundary = "----VisentraBoundary7MA4YWxkTrZu0gW"
-    body_parts = []
-
-    for name, value in fields.items():
-        body_parts.append(
-            f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}"
-        )
-
-    for name, (filename, content_bytes, content_type) in files.items():
-        body_parts.append(
-            f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"; filename=\"{filename}\"\r\nContent-Type: {content_type}\r\n\r\n"
-        )
-        body_parts[-1] = body_parts[-1].encode() + content_bytes
-
-    body = b""
-    for part in body_parts:
-        if isinstance(part, str):
-            body += part.encode() + b"\r\n"
-        else:
-            body += part + b"\r\n"
-    body += f"--{boundary}--\r\n".encode()
-
-    req = urllib.request.Request(
-        f"{BASE_URL}{path}",
-        data=body,
-        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=60) as r:
-        return json.loads(r.read())
 
 def _make_png_image(r: int, g: int, b: int, size: int = 64) -> bytes:
     """Generate a minimal valid 64x64 solid-colour PNG in pure Python."""
-    import zlib, struct
+    import zlib
 
     def chunk(name: bytes, data: bytes) -> bytes:
         c = struct.pack(">I", len(data)) + name + data
@@ -95,31 +53,39 @@ def _make_png_image(r: int, g: int, b: int, size: int = 64) -> bytes:
     iend = chunk(b"IEND", b"")
     return header + ihdr + idat + iend
 
+
 def _make_tiny_onnx() -> bytes:
     return os.urandom(4096)
 
-def main():
-    print("VISENTRA Demo Seed")
-    print("=" * 40)
 
+async def _run_seed_steps(client: httpx.AsyncClient) -> dict:
+    # 0. Prevent duplicate data if database already contains the demo data
     try:
-        with urllib.request.urlopen(f"{BASE_URL}/health", timeout=5) as r:
-            status = json.loads(r.read())
-            print(f"✓ Backend reachable: {status}")
+        resp = await client.get("/contributors")
+        if resp.status_code == 200:
+            contributors = resp.json()
+            existing_demo = next((c for c in contributors if c.get("name") == "VISENTRA Demo"), None)
+            if existing_demo:
+                print(f"✓ Demo data already exists (contributor_id = {existing_demo['id']}). Skipping seeding.")
+                demo_ids_path = Path(__file__).resolve().parent / "demo_ids.json"
+                if demo_ids_path.exists():
+                    try:
+                        return json.loads(demo_ids_path.read_text())
+                    except Exception:
+                        pass
+                return {"contributor_id": existing_demo["id"]}
     except Exception as e:
-        print(f"✗ Cannot reach backend at {BASE_URL}: {e}")
-        print("  Start the backend first: uvicorn backend.main:app --port 8001 --reload")
-        sys.exit(1)
+        print(f"Note: Could not check existing contributors: {e}")
 
     print("\n[1] Creating contributor…")
-    contributor = _post_json("/contributors", {"name": "VISENTRA Demo"})
+    r = await client.post("/contributors", json={"name": "VISENTRA Demo"})
+    r.raise_for_status()
+    contributor = r.json()
     cid = contributor["id"]
     print(f"  contributor_id = {cid}")
 
     print("\n[2] Building synthetic dataset (10 images with near-duplicate pair)…")
     rng = random.Random(42)
-
-    import zipfile
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for i in range(8):
@@ -132,58 +98,74 @@ def main():
     dataset_bytes = zip_buf.getvalue()
     print(f"  dataset archive: {len(dataset_bytes)} bytes")
 
-    dataset = _post_multipart(
+    r = await client.post(
         "/datasets",
-        {"contributor_id": cid, "version": "1.0"},
-        {"file": ("demo_dataset.zip", dataset_bytes, "application/zip")},
+        data={"contributor_id": cid, "version": "1.0"},
+        files={"file": ("demo_dataset.zip", dataset_bytes, "application/zip")},
     )
+    r.raise_for_status()
+    dataset = r.json()
     did = dataset["id"]
     print(f"  dataset_id = {did}")
     print(f"  sha256     = {dataset['sha256'][:16]}…")
 
     print("\n[3] Running dataset assurance checks (Deduplication + OOD)…")
     try:
-        ds_analysis = _post_json(f"/datasets/{did}/analyze", {})
-        print(f"  dataset status   = {ds_analysis.get('status')}")
-        print(f"  duplicate pairs  = {ds_analysis.get('duplicate_pairs')}")
-        print(f"  ood flagged      = {ds_analysis.get('ood_flagged')}")
+        r = await client.post(f"/datasets/{did}/analyze")
+        if r.status_code == 200:
+            ds_analysis = r.json()
+            print(f"  dataset status   = {ds_analysis.get('status')}")
+            print(f"  duplicate pairs  = {ds_analysis.get('duplicate_pairs')}")
+            print(f"  ood flagged      = {ds_analysis.get('ood_flagged')}")
     except Exception as e:
         print(f"  (dataset analyze skipped: {e})")
 
     print("\n[4] Uploading synthetic model…")
     model_bytes = _make_tiny_onnx()
-    model = _post_multipart(
+    r = await client.post(
         "/models",
-        {"contributor_id": cid, "version": "1.0"},
-        {"file": ("demo_model.onnx", model_bytes, "application/octet-stream")},
+        data={"contributor_id": cid, "version": "1.0"},
+        files={"file": ("demo_model.onnx", model_bytes, "application/octet-stream")},
     )
+    r.raise_for_status()
+    model = r.json()
     mid = model["id"]
     print(f"  model_id = {mid}")
     print(f"  sha256   = {model['sha256'][:16]}…")
 
     print("\n[5] Running backdoor scan (Trojan candidate detection)…")
-    scan = _post_json(f"/models/{mid}/backdoor-scan", {})
-    print(f"  scan status     = {scan['status']}")
-    print(f"  top confidence  = {scan['top_confidence']:.2f}")
-    print(f"  findings        = {len(scan['findings'])}")
-    if scan["findings"]:
-        top = scan["findings"][0]
-        print(f"  top trigger     = {top['trigger_type']} (conf={top['confidence']:.2f})")
+    try:
+        r = await client.post(f"/models/{mid}/backdoor-scan")
+        if r.status_code == 200:
+            scan = r.json()
+            print(f"  scan status     = {scan.get('status')}")
+            print(f"  top confidence  = {scan.get('top_confidence', 0.0):.2f}")
+            findings = scan.get("findings", [])
+            print(f"  findings        = {len(findings)}")
+            if findings:
+                top = findings[0]
+                print(f"  top trigger     = {top.get('trigger_type')} (conf={top.get('confidence', 0.0):.2f})")
+    except Exception as e:
+        print(f"  (backdoor scan skipped: {e})")
 
     print("\n[6] Binding inference executions (Pillar IV Cryptographic Binding)…")
-    inf1 = _post_multipart(
+    r = await client.post(
         "/inference",
-        {"model_id": mid, "config": json.dumps({"batch_size": 1, "precision": "fp32"})},
-        {"image": ("query_telemetry_01.png", _make_png_image(40, 160, 220), "image/png")},
+        data={"model_id": mid, "config": json.dumps({"batch_size": 1, "precision": "fp32"})},
+        files={"image": ("query_telemetry_01.png", _make_png_image(40, 160, 220), "image/png")},
     )
+    r.raise_for_status()
+    inf1 = r.json()
     print(f"  inference_1 id  = {inf1['id']}")
     print(f"  confidence      = {inf1.get('confidence', 0.0):.2f}")
 
-    inf2 = _post_multipart(
+    r = await client.post(
         "/inference",
-        {"model_id": mid, "config": json.dumps({"batch_size": 1, "precision": "fp32"})},
-        {"image": ("query_telemetry_02.png", _make_png_image(200, 80, 50), "image/png")},
+        data={"model_id": mid, "config": json.dumps({"batch_size": 1, "precision": "fp32"})},
+        files={"image": ("query_telemetry_02.png", _make_png_image(200, 80, 50), "image/png")},
     )
+    r.raise_for_status()
+    inf2 = r.json()
     print(f"  inference_2 id  = {inf2['id']}")
     print(f"  confidence      = {inf2.get('confidence', 0.0):.2f}")
 
@@ -195,10 +177,6 @@ def main():
     print(f"  Inference 1    : {inf1['id']}")
     print(f"  Inference 2    : {inf2['id']}")
     print()
-    print("Open the frontend at http://localhost:5173")
-    print("Select 'VISENTRA Demo' in the sidebar to see the lineage graph.")
-    print()
-    print("IDs saved to: scripts/demo_ids.json")
 
     ids = {
         "contributor_id": cid,
@@ -206,7 +184,48 @@ def main():
         "model_id": mid,
         "inference_ids": [inf1["id"], inf2["id"]],
     }
-    Path("scripts/demo_ids.json").write_text(json.dumps(ids, indent=2))
+    try:
+        demo_ids_path = Path(__file__).resolve().parent / "demo_ids.json"
+        demo_ids_path.write_text(json.dumps(ids, indent=2))
+        print("IDs saved to: scripts/demo_ids.json")
+    except Exception:
+        pass
+
+    return ids
+
+
+async def seed_demo_data(app=None, base_url: str | None = None) -> dict:
+    """
+    Seed VISENTRA demo data.
+    If app is provided, executes directly in-memory via httpx ASGITransport (perfect for lifespan startup).
+    If base_url is provided (or defaults to VISENTRA_API), connects over HTTP.
+    """
+    if app is not None:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://local-visentra",
+            timeout=60.0,
+        ) as client:
+            return await _run_seed_steps(client)
+    else:
+        url = (base_url or BASE_URL).rstrip("/")
+        async with httpx.AsyncClient(base_url=url, timeout=60.0) as client:
+            try:
+                resp = await client.get("/health", timeout=5.0)
+                if resp.status_code == 200:
+                    print(f"✓ Backend reachable at {url}")
+            except Exception as e:
+                print(f"✗ Cannot reach backend at {url}: {e}")
+                print("  Start the backend first: uvicorn backend.main:app --port 8001 --reload")
+                return {}
+            return await _run_seed_steps(client)
+
+
+def main():
+    print("VISENTRA Demo Seed")
+    print("=" * 40)
+    asyncio.run(seed_demo_data(base_url=BASE_URL))
+
 
 if __name__ == "__main__":
     main()
