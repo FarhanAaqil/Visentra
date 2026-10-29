@@ -7,6 +7,9 @@ export interface SampleFinding {
   image?: string
   image_a?: string
   image_b?: string
+  sample_id?: string
+  sample_a_id?: string
+  sample_b_id?: string
   hamming_distance?: number
   anomaly_score?: number
   flag?: string | null
@@ -21,9 +24,9 @@ interface Props {
 export function ThumbnailGrid({ datasetId, findings }: Props) {
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null)
 
-  const getThumbnailUrl = (path?: string) => {
-    if (!path) return ''
-    return `${API_BASE}/datasets/${datasetId}/thumbnail?path=${encodeURIComponent(path)}&size=96&quality=80`
+  const getThumbnailUrl = (sampleId?: string) => {
+    if (!sampleId) return ''
+    return `${API_BASE}/datasets/${datasetId}/samples/${sampleId}/thumbnail?size=96`
   }
 
   return (
@@ -60,7 +63,7 @@ export function ThumbnailGrid({ datasetId, findings }: Props) {
                 }}
               >
                 <img
-                  src={getThumbnailUrl(f.image || f.image_a)}
+                  src={getThumbnailUrl(f.sample_id || f.sample_a_id)}
                   alt="Sample"
                   loading="lazy"
                   style={{
@@ -136,7 +139,7 @@ export function ThumbnailGrid({ datasetId, findings }: Props) {
               <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                 <div>
                   <img
-                    src={getThumbnailUrl(findings[expandedIndex].image_a)}
+                    src={getThumbnailUrl(findings[expandedIndex].sample_a_id)}
                     alt="Sample A"
                     style={{ width: 110, height: 110, objectFit: 'cover', border: '1px solid var(--rule-strong)' }}
                   />
@@ -149,7 +152,7 @@ export function ThumbnailGrid({ datasetId, findings }: Props) {
 
                 <div>
                   <img
-                    src={getThumbnailUrl(findings[expandedIndex].image_b)}
+                    src={getThumbnailUrl(findings[expandedIndex].sample_b_id)}
                     alt="Sample B"
                     style={{ width: 110, height: 110, objectFit: 'cover', border: '1px solid var(--rule-strong)' }}
                   />
@@ -172,7 +175,7 @@ export function ThumbnailGrid({ datasetId, findings }: Props) {
           ) : (
             <div style={{ display: 'flex', gap: 20, alignItems: 'center' }}>
               <img
-                src={getThumbnailUrl(findings[expandedIndex].image)}
+                src={getThumbnailUrl(findings[expandedIndex].sample_id)}
                 alt="OOD Sample"
                 style={{ width: 110, height: 110, objectFit: 'cover', border: '1px solid var(--rule-strong)' }}
               />
