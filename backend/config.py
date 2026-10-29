@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     embedder_onnx: str = ""
 
     sandbox_timeout_s: float = 60.0
-    sandbox_memory_mb: int = 1536
+    sandbox_memory_mb: int = 3072
     cascade_delay_s: float = 0.15
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

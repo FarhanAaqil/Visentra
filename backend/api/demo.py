@@ -3,7 +3,7 @@
 Gated behind settings.enable_demo so a real deployment can switch them off.
 """
 
-import os
+import random
 import shutil
 
 import cv2
@@ -14,6 +14,7 @@ from backend import storage
 from backend.api.audit import actor_header, log_audit
 from backend.api.datasets import dataset_samples
 from backend.api.deps import get_or_404, require_demo
+from backend.api.models import vault_copy
 from backend.api.ws import broadcast
 from backend.assurance import synthetic
 from backend.db.models import Dataset, Model
@@ -25,15 +26,33 @@ router = APIRouter(prefix="/demo", tags=["demo"], dependencies=[Depends(require_
 @router.post("/models/{model_id}/tamper")
 async def tamper_model(
     model_id: str,
+    flips: int = 12,
     db: AsyncSession = Depends(get_db),
     actor: str = Depends(actor_header),
 ):
+    """Bit-flip attack: flip one bit in ``flips`` bytes of the weight region, keeping a vault copy."""
     model = await get_or_404(db, Model, model_id)
     stored = storage.models() / model.sha256
     if not stored.exists():
         raise HTTPException(status_code=404, detail="Stored model file not found")
 
-    stored.write_bytes(os.urandom(1024))
+    pristine = vault_copy(model)
+    if not pristine.exists():
+        shutil.copy2(stored, pristine)
+
+    data = bytearray(stored.read_bytes())
+    rng = random.Random(f"{model.id}:{len(data)}")
+    regions = (model.graph_summary or {}).get("weight_regions") or []
+    if regions:
+        # Aim at the weight tensors themselves, the way a Bit-Flip Attack would.
+        span = [i for r in regions for i in range(r["offset"], r["offset"] + r["length"])]
+    else:
+        span = list(range(len(data) // 2, len(data)))
+    offsets = sorted(rng.sample(span, k=min(max(1, flips), len(span))))
+    for off in offsets:
+        data[off] ^= 1 << rng.randrange(8)
+    stored.write_bytes(bytes(data))
+
     before = {"status": model.status}
     model.status = "tampered"
     log_audit(
@@ -43,11 +62,11 @@ async def tamper_model(
         artifact_type="model",
         artifact_id=model.id,
         before=before,
-        after={"status": "tampered"},
+        after={"status": "tampered", "flipped_offsets": offsets},
     )
     await db.commit()
     await broadcast({"type": "node_status", "node_type": "model", "id": model_id, "status": "tampered"})
-    return {"detail": "Model file tampered. Digest divergence broadcast to live listeners."}
+    return {"detail": f"Flipped {len(offsets)} bits in the stored checkpoint.", "flipped_offsets": offsets}
 
 
 @router.post("/datasets/{dataset_id}/tamper")
@@ -123,21 +142,14 @@ async def restore_model(
     db: AsyncSession = Depends(get_db),
     actor: str = Depends(actor_header),
 ):
+    """Copy the pristine checkpoint back from the vault; verify afterwards to clear the alarm."""
     model = await get_or_404(db, Model, model_id)
-    stored = storage.models() / model.sha256
-    if stored.exists():
-        stored.unlink()
+    pristine = vault_copy(model)
+    if not pristine.exists():
+        raise HTTPException(status_code=404, detail="No vault copy for this model; nothing to restore")
 
-    before = {"status": model.status}
-    model.status = "pending"
-    log_audit(
-        db,
-        actor=actor,
-        action="model.restore",
-        artifact_type="model",
-        artifact_id=model.id,
-        before=before,
-        after={"status": "pending"},
-    )
+    shutil.copy2(pristine, storage.models() / model.sha256)
+    pristine.unlink()
+    log_audit(db, actor=actor, action="model.restore", artifact_type="model", artifact_id=model.id)
     await db.commit()
-    return {"detail": "Demo state reset. Re-upload the model to restore a verified state."}
+    return {"detail": "Pristine checkpoint restored from the vault. Re-verify to clear the alarm."}
