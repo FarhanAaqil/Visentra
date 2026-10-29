@@ -1,26 +1,26 @@
-"""
-VISENTRA Demo Seed Script
-=========================
-Bootstraps a deterministic, reproducible demo state so the 5-minute
-demo script (see VISENTRA_Implementation_Plan.md §7) works every run.
+"""VISENTRA demo seeder.
 
-What it does:
-  1. Creates a demo contributor "VISENTRA Demo"
-  2. Creates a synthetic 10-image dataset (with near-duplicate pair)
-  3. Runs dataset assurance checks (perceptual hashing & OOD)
-  4. Creates and uploads a synthetic ONNX model
-  5. Runs a backdoor scan — detects trigger candidates
-  6. Binds 2 inference executions with cryptographic signatures
-  7. Saves the IDs to scripts/demo_ids.json
+Builds a deterministic pipeline that exercises all four pillars with real
+artifacts, no synthetic fallbacks:
 
-Can be run directly via CLI:
-    python scripts/seed_demo.py
+  1. Contributor "VISENTRA Demo"
+  2. A procedural 18 image dataset with a planted near-duplicate and an OOD
+     texture, unpacked, Merkle sealed and screened
+  3. Model v1.0, an ONNX classifier with a planted checkerboard Trojan,
+     trained on that dataset and interrogated (comes back suspicious)
+  4. Model v1.1, the clean twin with identical topology (comes back clean)
+  5. Signed inferences on both, including one checkerboard-stamped query
+     that the Trojan hijacks to class 7
 
-Or imported by the backend for automatic startup seeding:
-    await seed_demo_data(app=app)
+Run it against a live server:
+
+    python scripts/seed_demo.py            # uses VISENTRA_API or http://localhost:8000
+
+or let the backend call ``seed_demo_data(app=app)`` on first start.
 """
 
 import asyncio
+import contextlib
 import json
 import os
 import sys
@@ -37,168 +37,134 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 BASE_URL = os.getenv("VISENTRA_API", "http://localhost:8000")
+DEMO_NAME = "VISENTRA Demo"
+IDS_FILE = Path(__file__).resolve().parent / "demo_ids.json"
+HEADERS = {"X-Visentra-Actor": "seed-script"}
+
+
+def _ok(r: httpx.Response) -> dict:
+    if r.status_code >= 400:
+        raise RuntimeError(f"{r.request.method} {r.request.url.path} -> {r.status_code}: {r.text[:300]}")
+    return r.json()
+
+
+async def _upload_model(client: httpx.AsyncClient, cid: str, did: str, version: str, trojan: bool) -> dict:
+    name = f"traffic_classifier_v{version}.onnx"
+    return _ok(
+        await client.post(
+            "/models",
+            data={"contributor_id": cid, "version": version, "dataset_id": did},
+            files={"file": (name, build_classifier(trojan=trojan), "application/octet-stream")},
+        )
+    )
+
+
+async def _infer(client: httpx.AsyncClient, mid: str, name: str, img, config: dict) -> dict:
+    return _ok(
+        await client.post(
+            "/inference",
+            data={"model_id": mid, "config": json.dumps(config, sort_keys=True)},
+            files={"image": (name, synthetic.encode_png(img), "image/png")},
+        )
+    )
 
 
 async def _run_seed_steps(client: httpx.AsyncClient) -> dict:
-    # 0. Prevent duplicate data if database already contains the demo data
-    try:
-        resp = await client.get("/contributors")
-        if resp.status_code == 200:
-            contributors = resp.json()
-            existing_demo = next((c for c in contributors if c.get("name") == "VISENTRA Demo"), None)
-            if existing_demo:
-                print(
-                    f"✓ Demo data already exists (contributor_id = {existing_demo['id']}). Skipping seeding."
-                )
-                demo_ids_path = Path(__file__).resolve().parent / "demo_ids.json"
-                if demo_ids_path.exists():
-                    try:
-                        return json.loads(demo_ids_path.read_text())
-                    except Exception:
-                        pass
-                return {"contributor_id": existing_demo["id"]}
-    except Exception as e:
-        print(f"Note: Could not check existing contributors: {e}")
+    existing = next((c for c in _ok(await client.get("/contributors")) if c["name"] == DEMO_NAME), None)
+    if existing:
+        print(f"Demo data already present (contributor {existing['id']}), nothing to do.")
+        if IDS_FILE.exists():
+            return json.loads(IDS_FILE.read_text())
+        return {"contributor_id": existing["id"]}
 
-    print("\n[1] Creating contributor…")
-    r = await client.post("/contributors", json={"name": "VISENTRA Demo"})
-    r.raise_for_status()
-    contributor = r.json()
-    cid = contributor["id"]
-    print(f"  contributor_id = {cid}")
+    print("[1] Registering contributor")
+    cid = _ok(await client.post("/contributors", json={"name": DEMO_NAME, "role": "Assurance Lead"}))["id"]
 
-    print("\n[2] Building procedural dataset (16 scenes, a near-duplicate and a texture outlier)…")
-    dataset_bytes = synthetic.zip_images(synthetic.demo_dataset(seed=42))
-    print(f"  dataset archive: {len(dataset_bytes)} bytes")
-
-    r = await client.post(
-        "/datasets",
-        data={"contributor_id": cid, "version": "1.0"},
-        files={"file": ("demo_dataset.zip", dataset_bytes, "application/zip")},
+    print("[2] Uploading and screening the dataset")
+    archive = synthetic.zip_images(synthetic.demo_dataset(seed=42))
+    ds = _ok(
+        await client.post(
+            "/datasets",
+            data={"contributor_id": cid, "version": "1.0"},
+            files={"file": ("traffic_scenes_v1.zip", archive, "application/zip")},
+        )
     )
-    r.raise_for_status()
-    dataset = r.json()
-    did = dataset["id"]
-    print(f"  dataset_id = {did}")
-    print(f"  sha256     = {dataset['sha256'][:16]}…")
-
-    print("\n[3] Running dataset assurance checks (Deduplication + OOD)…")
-    try:
-        r = await client.post(f"/datasets/{did}/analyze")
-        if r.status_code == 200:
-            ds_analysis = r.json()
-            print(f"  dataset status   = {ds_analysis.get('status')}")
-            print(f"  duplicate pairs  = {ds_analysis.get('duplicate_pairs')}")
-            print(f"  ood flagged      = {ds_analysis.get('ood_flagged')}")
-    except Exception as e:
-        print(f"  (dataset analyze skipped: {e})")
-
-    print("\n[4] Uploading the generated ONNX classifier with its planted checkerboard Trojan…")
-    model_bytes = build_classifier(trojan=True)
-    r = await client.post(
-        "/models",
-        data={"contributor_id": cid, "version": "1.0", "dataset_id": did},
-        files={"file": ("demo_model.onnx", model_bytes, "application/octet-stream")},
+    did = ds["id"]
+    analysis = _ok(await client.post(f"/datasets/{did}/analyze"))
+    print(
+        f"    {ds['sample_count']} samples, Merkle root {ds['merkle_root'][:16]}…, "
+        f"{analysis['duplicate_pairs']} duplicate pair(s), {analysis['ood_flagged']} OOD sample(s)"
     )
-    r.raise_for_status()
-    model = r.json()
-    mid = model["id"]
-    print(f"  model_id = {mid}")
-    print(f"  sha256   = {model['sha256'][:16]}…")
 
-    print("\n[5] Running backdoor scan (Trojan candidate detection)…")
-    try:
-        r = await client.post(f"/models/{mid}/backdoor-scan")
-        if r.status_code == 200:
-            scan = r.json()
-            print(f"  scan status     = {scan.get('status')}")
-            print(f"  top confidence  = {scan.get('top_confidence', 0.0):.2f}")
-            findings = scan.get("findings", [])
-            print(f"  findings        = {len(findings)}")
-            if findings:
-                top = findings[0]
-                print(
-                    f"  top trigger     = {top.get('trigger_type')} (conf={top.get('confidence', 0.0):.2f})"
-                )
-    except Exception as e:
-        print(f"  (backdoor scan skipped: {e})")
+    print("[3] Registering model v1.0 (carries a planted Trojan) and interrogating it")
+    trojan = await _upload_model(client, cid, did, "1.0", trojan=True)
+    scan = _ok(await client.post(f"/models/{trojan['id']}/backdoor-scan"))
+    top = scan["triggers"][0]
+    print(f"    verdict {scan['verdict']}, top trigger {top['trigger_type']} (C_bd={top['confidence']:.2f})")
 
-    print("\n[6] Binding inference executions (Pillar IV Cryptographic Binding)…")
-    r = await client.post(
-        "/inference",
-        data={"model_id": mid, "config": json.dumps({"batch_size": 1, "precision": "fp32"})},
-        files={"image": ("query_telemetry_01.png", synthetic.encode_png(synthetic.scene(3, 7)), "image/png")},
-    )
-    r.raise_for_status()
-    inf1 = r.json()
-    print(f"  inference_1 id  = {inf1['id']}")
-    print(f"  confidence      = {inf1.get('confidence', 0.0):.2f}")
+    print("[4] Registering model v1.1 (clean twin) and interrogating it")
+    clean = await _upload_model(client, cid, did, "1.1", trojan=False)
+    clean_scan = _ok(await client.post(f"/models/{clean['id']}/backdoor-scan"))
+    print(f"    verdict {clean_scan['verdict']}, top C_bd={clean_scan['top_confidence']:.2f}")
 
-    r = await client.post(
-        "/inference",
-        data={"model_id": mid, "config": json.dumps({"batch_size": 1, "precision": "fp32"})},
-        files={"image": ("query_telemetry_02.png", synthetic.encode_png(synthetic.scene(1, 8)), "image/png")},
-    )
-    r.raise_for_status()
-    inf2 = r.json()
-    print(f"  inference_2 id  = {inf2['id']}")
-    print(f"  confidence      = {inf2.get('confidence', 0.0):.2f}")
-
-    print("\n" + "=" * 40)
-    print("DEMO SEED COMPLETE")
-    print(f"  Contributor ID : {cid}")
-    print(f"  Dataset ID     : {did}")
-    print(f"  Model ID       : {mid}")
-    print(f"  Inference 1    : {inf1['id']}")
-    print(f"  Inference 2    : {inf2['id']}")
-    print()
+    print("[5] Running signed inferences")
+    config = {"batch_size": 1, "precision": "fp32", "threshold": 0.5}
+    inferences = [
+        await _infer(client, trojan["id"], "query_amber_01.png", synthetic.scene(1, 8001), config),
+        await _infer(client, trojan["id"], "query_azure_02.png", synthetic.scene(3, 8002), config),
+        await _infer(
+            client,
+            trojan["id"],
+            "query_leaf_stamped_03.png",
+            synthetic.stamp_checkerboard(synthetic.scene(2, 8003), 44, 44, 16),
+            config,
+        ),
+        await _infer(client, clean["id"], "query_crimson_04.png", synthetic.scene(0, 8004), config),
+        await _infer(
+            client,
+            clean["id"],
+            "query_leaf_stamped_05.png",
+            synthetic.stamp_checkerboard(synthetic.scene(2, 8003), 44, 44, 16),
+            config,
+        ),
+    ]
+    for inf in inferences:
+        print(f"    {inf['id'][:8]} -> class {inf['output']['top_class']} ({inf['confidence']:.2f}), signed")
 
     ids = {
         "contributor_id": cid,
         "dataset_id": did,
-        "model_id": mid,
-        "inference_ids": [inf1["id"], inf2["id"]],
+        "model_id": trojan["id"],
+        "clean_model_id": clean["id"],
+        "inference_ids": [i["id"] for i in inferences],
     }
-    try:
-        demo_ids_path = Path(__file__).resolve().parent / "demo_ids.json"
-        demo_ids_path.write_text(json.dumps(ids, indent=2))
-        print("IDs saved to: scripts/demo_ids.json")
-    except Exception:
-        pass
-
+    with contextlib.suppress(OSError):  # read-only checkouts can still seed
+        IDS_FILE.write_text(json.dumps(ids, indent=2))
+    print("Demo pipeline ready.")
     return ids
 
 
 async def seed_demo_data(app=None, base_url: str | None = None) -> dict:
-    """
-    Seed VISENTRA demo data.
-    If app is provided, executes directly in-memory via httpx ASGITransport (perfect for lifespan startup).
-    If base_url is provided (or defaults to VISENTRA_API), connects over HTTP.
-    """
+    """Seed in-process through ASGI when ``app`` is given, otherwise over HTTP."""
     if app is not None:
+        transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app),
-            base_url="http://local-visentra",
-            timeout=60.0,
-        ) as client:
-            return await _run_seed_steps(client)
-    else:
-        url = (base_url or BASE_URL).rstrip("/")
-        async with httpx.AsyncClient(base_url=url, timeout=60.0) as client:
-            try:
-                resp = await client.get("/health", timeout=5.0)
-                if resp.status_code == 200:
-                    print(f"✓ Backend reachable at {url}")
-            except Exception as e:
-                print(f"✗ Cannot reach backend at {url}: {e}")
-                print("  Start the backend first: uvicorn backend.main:app --port 8001 --reload")
-                return {}
-            return await _run_seed_steps(client)
+            transport=transport, base_url="http://seed", timeout=120, headers=HEADERS
+        ) as c:
+            return await _run_seed_steps(c)
+
+    url = (base_url or BASE_URL).rstrip("/")
+    async with httpx.AsyncClient(base_url=url, timeout=120, headers=HEADERS) as client:
+        try:
+            _ok(await client.get("/health", timeout=5))
+        except Exception as e:
+            print(f"Cannot reach the backend at {url}: {e}")
+            print("Start it first: uvicorn backend.main:app --port 8000")
+            return {}
+        return await _run_seed_steps(client)
 
 
-def main():
-    print("VISENTRA Demo Seed")
-    print("=" * 40)
+def main() -> None:
     asyncio.run(seed_demo_data(base_url=BASE_URL))
 
 
