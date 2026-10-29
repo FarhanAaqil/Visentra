@@ -4,14 +4,18 @@ Gated behind settings.enable_demo so a real deployment can switch them off.
 """
 
 import os
+import shutil
 
+import cv2
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend import storage
 from backend.api.audit import actor_header, log_audit
+from backend.api.datasets import dataset_samples
 from backend.api.deps import get_or_404, require_demo
 from backend.api.ws import broadcast
+from backend.assurance import synthetic
 from backend.db.models import Dataset, Model
 from backend.db.session import get_db
 
@@ -52,15 +56,65 @@ async def tamper_dataset(
     db: AsyncSession = Depends(get_db),
     actor: str = Depends(actor_header),
 ):
+    """Poison one stored sample with a checkerboard patch, as an annotator-side attacker would."""
     dataset = await get_or_404(db, Dataset, dataset_id)
-    stored = storage.datasets() / dataset.sha256
-    if not stored.exists():
-        raise HTTPException(status_code=404, detail="Stored dataset file not found")
+    samples = await dataset_samples(db, dataset_id)
+    if not samples:
+        raise HTTPException(status_code=404, detail="Dataset has no stored samples to tamper with")
 
-    stored.write_bytes(os.urandom(1024))
-    log_audit(db, actor=actor, action="dataset.tamper", artifact_type="dataset", artifact_id=dataset.id)
+    victim = samples[0]
+    path = storage.resolve(victim.path)
+    img = cv2.imread(str(path))
+    if img is None:
+        raise HTTPException(status_code=404, detail="Stored sample file not found")
+
+    backup = storage.vault() / f"sample-{victim.id}{path.suffix}"
+    if not backup.exists():
+        shutil.copy2(path, backup)
+    poisoned = synthetic.stamp_checkerboard(img, img.shape[1] - 12, img.shape[0] - 12, 8)
+    cv2.imwrite(str(path), poisoned)
+
+    log_audit(
+        db,
+        actor=actor,
+        action="dataset.tamper",
+        artifact_type="dataset",
+        artifact_id=dataset.id,
+        after={"poisoned_sample": victim.id, "sample_name": victim.name},
+    )
     await db.commit()
-    return {"detail": "Dataset file tampered. Call /datasets/{id}/verify to detect the change."}
+    return {
+        "detail": "Sample poisoned. Verify the dataset to see the Merkle root diverge.",
+        "sample_id": victim.id,
+    }
+
+
+@router.post("/datasets/{dataset_id}/restore")
+async def restore_dataset(
+    dataset_id: str,
+    db: AsyncSession = Depends(get_db),
+    actor: str = Depends(actor_header),
+):
+    """Put back the pristine copies kept in the vault and re-run the integrity check."""
+    dataset = await get_or_404(db, Dataset, dataset_id)
+    restored = []
+    for sample in await dataset_samples(db, dataset_id):
+        path = storage.resolve(sample.path)
+        backup = storage.vault() / f"sample-{sample.id}{path.suffix}"
+        if backup.exists():
+            shutil.copy2(backup, path)
+            backup.unlink()
+            restored.append(sample.id)
+    log_audit(
+        db,
+        actor=actor,
+        action="dataset.restore",
+        artifact_type="dataset",
+        artifact_id=dataset.id,
+        after={"restored_samples": restored},
+    )
+    await db.commit()
+    return {"detail": f"Restored {len(restored)} sample(s) from the vault.", "restored": restored}
 
 
 @router.post("/models/{model_id}/restore")

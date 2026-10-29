@@ -42,11 +42,13 @@ export function DatasetInspectorPanel({ datasetId, datasetLabel, onClose, onStat
     api.get(`/datasets/${datasetId}/findings`)
       .then((res) => {
         if (res.data?.length > 0) {
-          const findings = res.data.map((f: any) => ({
-            check: f.check_type,
-            severity: f.severity,
-            ...f.evidence_json,
-          }))
+          const findings = res.data
+            .filter((f: any) => f.check_type !== 'analysis_summary')
+            .map((f: any) => ({
+              check: f.check_type,
+              severity: f.severity,
+              ...f.evidence_json,
+            }))
           setResult({
             dataset_id: datasetId,
             status: detail?.status || 'verified',
