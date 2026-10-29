@@ -72,3 +72,19 @@ def is_within(path: Path, parent: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def sample_dir(dataset_sha: str) -> Path:
+    return area(f"datasets/{dataset_sha}.samples")
+
+
+def relative(path: Path) -> str:
+    """Storage-relative POSIX path, so the database survives moving STORAGE_ROOT."""
+    return path.resolve().relative_to(root().resolve()).as_posix()
+
+
+def resolve(rel: str) -> Path:
+    path = (root() / rel).resolve()
+    if not is_within(path, root()):
+        raise ValueError(f"path escapes storage root: {rel}")
+    return path
