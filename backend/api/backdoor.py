@@ -4,25 +4,26 @@ Backdoor scan router.
 POST /models/{id}/backdoor-scan   — kick off a scan (runs synchronously for now, async in Phase 5 polish)
 GET  /models/{id}/backdoor-scan/{scan_id} — retrieve evidence detail
 """
+
 import json
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.config import settings
-from backend.db.session import get_db
-from backend.db.models import Model, BackdoorFinding
+from backend import storage
+from backend.api.audit import actor_header, log_audit
+from backend.api.deps import get_or_404
 from backend.api.ws import broadcast
 from backend.assurance.model.backdoor import run_backdoor_scan
+from backend.db.models import BackdoorFinding, Model, iso
+from backend.db.session import get_db
 
 router = APIRouter(tags=["backdoor"])
 
-MODEL_STORE = Path(settings.storage_root) / "models"
-EVIDENCE_STORE = Path(settings.storage_root) / "evidence"
 
 class ScanResult(BaseModel):
     scan_id: str
@@ -30,6 +31,7 @@ class ScanResult(BaseModel):
     status: str
     findings: list[dict]
     top_confidence: float
+
 
 class FindingOut(BaseModel):
     id: str
@@ -43,38 +45,35 @@ class FindingOut(BaseModel):
     evidence_ref: str | None
     created_at: str
 
+
 @router.post("/models/{model_id}/backdoor-scan", response_model=ScanResult)
-async def start_backdoor_scan(model_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Model).where(Model.id == model_id))
-    model = result.scalar_one_or_none()
-    if not model:
-        raise HTTPException(status_code=404, detail="Model not found")
+async def start_backdoor_scan(
+    model_id: str,
+    db: AsyncSession = Depends(get_db),
+    actor: str = Depends(actor_header),
+):
+    model = await get_or_404(db, Model, model_id)
+    model_path = storage.models() / model.sha256
 
-    model_path = MODEL_STORE / model.sha256
-
-    dataset_store = Path(settings.storage_root) / "datasets"
-    sample_images: list[Path] = []
-    if dataset_store.exists():
-        sample_images = [
-            p for p in dataset_store.rglob("*")
-            if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp"}
-        ][:20]
+    sample_images: list[Path] = [
+        p for p in storage.datasets().rglob("*") if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp"}
+    ][:20]
 
     try:
         findings_raw = run_backdoor_scan(model_path, sample_images)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Scan error: {e}")
+        raise HTTPException(status_code=500, detail=f"Scan error: {e}") from e
 
-    EVIDENCE_STORE.mkdir(parents=True, exist_ok=True)
     scan_id = str(uuid.uuid4())
     top_confidence = max((f["confidence"] for f in findings_raw), default=0.0)
 
     for f in findings_raw:
-        evidence_path = EVIDENCE_STORE / f"{scan_id}_{f['trigger_type']}.json"
+        evidence_path = storage.evidence() / f"{scan_id}_{f['trigger_type']}.json"
         evidence_path.write_text(json.dumps(f["evidence"], indent=2))
 
         finding = BackdoorFinding(
             model_id=model_id,
+            scan_id=scan_id,
             trigger_type=f["trigger_type"],
             target_class=f.get("target_class"),
             consistency_rate=f.get("consistency_rate"),
@@ -86,17 +85,29 @@ async def start_backdoor_scan(model_id: str, db: AsyncSession = Depends(get_db))
         db.add(finding)
 
     new_status = "suspicious" if top_confidence >= 0.3 else "verified"
+    before = {"status": model.status}
     model.status = new_status
+    log_audit(
+        db,
+        actor=actor,
+        action="model.backdoor_scan",
+        artifact_type="model",
+        artifact_id=model.id,
+        before=before,
+        after={"status": new_status, "scan_id": scan_id, "top_confidence": top_confidence},
+    )
     await db.commit()
 
-    await broadcast({
-        "type": "node_status",
-        "node_type": "model",
-        "id": model_id,
-        "status": new_status,
-        "scan_id": scan_id,
-        "top_confidence": top_confidence,
-    })
+    await broadcast(
+        {
+            "type": "node_status",
+            "node_type": "model",
+            "id": model_id,
+            "status": new_status,
+            "scan_id": scan_id,
+            "top_confidence": top_confidence,
+        }
+    )
 
     return ScanResult(
         scan_id=scan_id,
@@ -105,6 +116,7 @@ async def start_backdoor_scan(model_id: str, db: AsyncSession = Depends(get_db))
         findings=findings_raw,
         top_confidence=top_confidence,
     )
+
 
 @router.get("/models/{model_id}/backdoor-findings", response_model=list[FindingOut])
 async def get_backdoor_findings(model_id: str, db: AsyncSession = Depends(get_db)):
@@ -125,7 +137,7 @@ async def get_backdoor_findings(model_id: str, db: AsyncSession = Depends(get_db
             cluster_score=f.cluster_score,
             confidence=f.confidence,
             evidence_ref=f.evidence_ref,
-            created_at=f.created_at.isoformat(),
+            created_at=iso(f.created_at),
         )
         for f in findings
     ]

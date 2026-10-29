@@ -4,22 +4,23 @@ Assurance report router.
 GET /report/{contributor_id} — aggregate all findings into a 0–100 score
                                with component breakdown + explicit limitations.
 """
-import json
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
 
-from backend.db.session import get_db
 from backend.db.models import (
-    Contributor, Dataset, Model, Inference,
-    BackdoorFinding, Finding, AuditLog,
+    BackdoorFinding,
+    Contributor,
+    Dataset,
+    Inference,
+    Model,
 )
+from backend.db.session import get_db
 
 router = APIRouter(prefix="/report", tags=["report"])
+
 
 class ScoreBreakdown(BaseModel):
     dataset_integrity: float
@@ -27,6 +28,7 @@ class ScoreBreakdown(BaseModel):
     backdoor_screening: float
     inference_binding: float
     overall: float
+
 
 class ReportOut(BaseModel):
     contributor_id: str
@@ -39,19 +41,26 @@ class ReportOut(BaseModel):
     models: list[dict]
     inferences: list[dict]
 
+
 LIMITATIONS = [
-    "Backdoor screening uses a fixed trigger library — it is a screening tool, not a proof of absence of all possible triggers.",
+    "Backdoor screening uses a fixed trigger library. It is a screening tool, "
+    "not a proof that no trigger exists.",
     "Hash-based tamper detection does not protect against an attacker who controls the storage layer.",
     "OOD scoring uses embedding similarity and is not a formal statistical test.",
     "Inference evidence records rely on the integrity of the local filesystem.",
     "Digital signatures are not implemented in this build — add PKI before production use.",
-    "This report reflects the pipeline state at the time of the last scan. Re-run all checks before each deployment.",
+    "This report reflects the pipeline state at the time of the last scan. "
+    "Re-run all checks before each deployment.",
 ]
+
 
 def _clamp(v: float) -> float:
     return max(0.0, min(100.0, v))
 
-async def _compute_scores(contributor_id: str, db: AsyncSession) -> tuple[ScoreBreakdown, dict, list, list, list]:
+
+async def _compute_scores(
+    contributor_id: str, db: AsyncSession
+) -> tuple[ScoreBreakdown, dict, list, list, list]:
     ds_result = await db.execute(select(Dataset).where(Dataset.contributor_id == contributor_id))
     datasets = ds_result.scalars().all()
 
@@ -75,9 +84,7 @@ async def _compute_scores(contributor_id: str, db: AsyncSession) -> tuple[ScoreB
     bd_score = 100.0
     model_ids = [m.id for m in models]
     if model_ids:
-        bd_result = await db.execute(
-            select(BackdoorFinding).where(BackdoorFinding.model_id.in_(model_ids))
-        )
+        bd_result = await db.execute(select(BackdoorFinding).where(BackdoorFinding.model_id.in_(model_ids)))
         bd_findings = bd_result.scalars().all()
         if bd_findings:
             max_conf = max((f.confidence or 0.0) for f in bd_findings)
@@ -90,9 +97,7 @@ async def _compute_scores(contributor_id: str, db: AsyncSession) -> tuple[ScoreB
     inf_score = 100.0
     all_inferences = []
     if model_ids:
-        inf_result = await db.execute(
-            select(Inference).where(Inference.model_id.in_(model_ids))
-        )
+        inf_result = await db.execute(select(Inference).where(Inference.model_id.in_(model_ids)))
         all_inferences = inf_result.scalars().all()
 
     if all_inferences:
@@ -101,12 +106,7 @@ async def _compute_scores(contributor_id: str, db: AsyncSession) -> tuple[ScoreB
     else:
         inf_score = 100.0
 
-    overall = _clamp(
-        0.20 * ds_score +
-        0.30 * m_score +
-        0.25 * bd_score +
-        0.25 * inf_score
-    )
+    overall = _clamp(0.20 * ds_score + 0.30 * m_score + 0.25 * bd_score + 0.25 * inf_score)
 
     score = ScoreBreakdown(
         dataset_integrity=round(ds_score, 1),
@@ -127,11 +127,20 @@ async def _compute_scores(contributor_id: str, db: AsyncSession) -> tuple[ScoreB
         "inferences_mismatch": sum(1 for i in all_inferences if i.status != "ok"),
     }
 
-    datasets_out = [{"id": d.id, "version": d.version, "status": d.status, "sha256": d.sha256[:12] + "…"} for d in datasets]
-    models_out = [{"id": m.id, "version": m.version, "framework": m.framework, "status": m.status} for m in models]
-    inferences_out = [{"id": i.id, "model_id": i.model_id, "status": i.status, "confidence": i.confidence} for i in all_inferences]
+    datasets_out = [
+        {"id": d.id, "version": d.version, "status": d.status, "sha256": d.sha256[:12] + "…"}
+        for d in datasets
+    ]
+    models_out = [
+        {"id": m.id, "version": m.version, "framework": m.framework, "status": m.status} for m in models
+    ]
+    inferences_out = [
+        {"id": i.id, "model_id": i.model_id, "status": i.status, "confidence": i.confidence}
+        for i in all_inferences
+    ]
 
     return score, findings_count, datasets_out, models_out, inferences_out
+
 
 @router.get("/{contributor_id}", response_model=ReportOut)
 async def get_report(contributor_id: str, db: AsyncSession = Depends(get_db)):

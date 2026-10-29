@@ -29,6 +29,7 @@ import struct
 import sys
 import zipfile
 from pathlib import Path
+
 import httpx
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -66,7 +67,9 @@ async def _run_seed_steps(client: httpx.AsyncClient) -> dict:
             contributors = resp.json()
             existing_demo = next((c for c in contributors if c.get("name") == "VISENTRA Demo"), None)
             if existing_demo:
-                print(f"✓ Demo data already exists (contributor_id = {existing_demo['id']}). Skipping seeding.")
+                print(
+                    f"✓ Demo data already exists (contributor_id = {existing_demo['id']}). Skipping seeding."
+                )
                 demo_ids_path = Path(__file__).resolve().parent / "demo_ids.json"
                 if demo_ids_path.exists():
                     try:
@@ -144,7 +147,9 @@ async def _run_seed_steps(client: httpx.AsyncClient) -> dict:
             print(f"  findings        = {len(findings)}")
             if findings:
                 top = findings[0]
-                print(f"  top trigger     = {top.get('trigger_type')} (conf={top.get('confidence', 0.0):.2f})")
+                print(
+                    f"  top trigger     = {top.get('trigger_type')} (conf={top.get('confidence', 0.0):.2f})"
+                )
     except Exception as e:
         print(f"  (backdoor scan skipped: {e})")
 

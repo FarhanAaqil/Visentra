@@ -1,59 +1,65 @@
+import logging
 import sys
-from pathlib import Path
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 _root = str(Path(__file__).resolve().parent.parent)
 if _root not in sys.path:
     sys.path.insert(0, _root)
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from sqlalchemy import func, select  # noqa: E402
 
-from backend.config import settings
-from sqlalchemy import select
-from backend.db.session import engine, AsyncSessionLocal
-from backend.db.models import Base, Contributor
-from backend.api.contributors import router as contributors_router
-from backend.api.datasets import router as datasets_router
-from backend.api.models import router as models_router
-from backend.api.chain import router as chain_router
-from backend.api.demo import router as demo_router
-from backend.api.backdoor import router as backdoor_router
-from backend.api.inference import router as inference_router
-from backend.api.dataset_assurance import router as dataset_assurance_router
-from backend.api.report import router as report_router
-from backend.api.ws import router as ws_router
+from backend.api.audit import router as audit_router  # noqa: E402
+from backend.api.backdoor import router as backdoor_router  # noqa: E402
+from backend.api.chain import router as chain_router  # noqa: E402
+from backend.api.contributors import router as contributors_router  # noqa: E402
+from backend.api.dataset_assurance import router as dataset_assurance_router  # noqa: E402
+from backend.api.datasets import router as datasets_router  # noqa: E402
+from backend.api.demo import router as demo_router  # noqa: E402
+from backend.api.inference import router as inference_router  # noqa: E402
+from backend.api.models import router as models_router  # noqa: E402
+from backend.api.report import router as report_router  # noqa: E402
+from backend.api.ws import router as ws_router  # noqa: E402
+from backend.config import settings  # noqa: E402
+from backend.db.models import Base, Contributor  # noqa: E402
+from backend.db.session import AsyncSessionLocal, engine  # noqa: E402
 
-import logging
 logger = logging.getLogger("uvicorn.error")
+
+VERSION = "1.0.0"
+
+
+async def _seed_if_empty(app: FastAPI) -> None:
+    async with AsyncSessionLocal() as session:
+        count = (await session.execute(select(func.count(Contributor.id)))).scalar_one()
+    if count:
+        return
+    logger.info("Database is empty, seeding the VISENTRA demo pipeline")
+    from scripts.seed_demo import seed_demo_data
+
+    await seed_demo_data(app=app)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    # Automatically seed demo data if database is empty
-    try:
-        async with AsyncSessionLocal() as session:
-            result = await session.execute(select(Contributor))
-            contributors = result.scalars().all()
-            is_empty = len(contributors) == 0
-            has_demo = any(c.name == "VISENTRA Demo" for c in contributors)
-
-        if is_empty and not has_demo:
-            logger.info("Database is empty — automatically seeding VISENTRA demo data...")
-            from scripts.seed_demo import seed_demo_data
-            await seed_demo_data(app=app)
-            logger.info("Demo data successfully seeded on startup.")
-    except Exception as e:
-        logger.warning("Auto-seed check encountered an error: %s", e)
+    if settings.auto_seed:
+        try:
+            await _seed_if_empty(app)
+        except Exception as e:  # seeding is a convenience, never block startup
+            logger.warning("Auto-seed failed: %s", e)
 
     yield
 
+
 app = FastAPI(
     title="VISENTRA",
-    description="AI Integrity Assurance Platform — SIH26228",
-    version="0.1.0",
+    description="Cryptographic provenance and behavioural assurance for CV supply chains (SIH26228)",
+    version=VERSION,
     lifespan=lifespan,
 )
 
@@ -65,17 +71,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(contributors_router)
-app.include_router(datasets_router)
-app.include_router(models_router)
-app.include_router(chain_router)
-app.include_router(ws_router)
-app.include_router(demo_router)
-app.include_router(backdoor_router)
-app.include_router(inference_router)
-app.include_router(dataset_assurance_router)
-app.include_router(report_router)
+for router in (
+    contributors_router,
+    datasets_router,
+    models_router,
+    chain_router,
+    ws_router,
+    demo_router,
+    backdoor_router,
+    inference_router,
+    dataset_assurance_router,
+    report_router,
+    audit_router,
+):
+    app.include_router(router)
+
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "visentra"}
+    return {"status": "ok", "service": "visentra", "version": VERSION, "demo": settings.enable_demo}

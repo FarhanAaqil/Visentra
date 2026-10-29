@@ -18,10 +18,7 @@ Evidence stored: trigger definition, affected image ids, before/after prediction
 
 from __future__ import annotations
 
-import io
-import json
 import random
-import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -29,21 +26,18 @@ import numpy as np
 
 try:
     import cv2
+
     HAS_CV2 = True
 except ImportError:
     HAS_CV2 = False
 
 try:
     import onnxruntime as ort
+
     HAS_ORT = True
 except ImportError:
     HAS_ORT = False
 
-try:
-    from PIL import Image
-    HAS_PIL = True
-except ImportError:
-    HAS_PIL = False
 
 def _checkerboard(img: np.ndarray, size: int = 16, x: int = 0, y: int = 0) -> np.ndarray:
     out = img.copy()
@@ -55,12 +49,16 @@ def _checkerboard(img: np.ndarray, size: int = 16, x: int = 0, y: int = 0) -> np
                 out[oy, ox] = [col, col, col]
     return out
 
-def _colored_square(img: np.ndarray, color: tuple[int, int, int], size: int = 12, x: int = 0, y: int = 0) -> np.ndarray:
+
+def _colored_square(
+    img: np.ndarray, color: tuple[int, int, int], size: int = 12, x: int = 0, y: int = 0
+) -> np.ndarray:
     out = img.copy()
     h, w = out.shape[:2]
     y2, x2 = min(y + size, h), min(x + size, w)
     out[y:y2, x:x2] = color
     return out
+
 
 def _small_cross(img: np.ndarray, size: int = 10, x: int = 0, y: int = 0) -> np.ndarray:
     out = img.copy()
@@ -71,22 +69,29 @@ def _small_cross(img: np.ndarray, size: int = 10, x: int = 0, y: int = 0) -> np.
                 out[oy, ox] = [255, 0, 0]
     return out
 
+
 TRIGGERS = [
     ("checkerboard_16px", lambda img, x, y: _checkerboard(img, 16, x, y)),
-    ("red_square_12px",   lambda img, x, y: _colored_square(img, (255, 0, 0), 12, x, y)),
+    ("red_square_12px", lambda img, x, y: _colored_square(img, (255, 0, 0), 12, x, y)),
     ("white_square_12px", lambda img, x, y: _colored_square(img, (255, 255, 255), 12, x, y)),
-    ("red_cross_10px",    lambda img, x, y: _small_cross(img, 10, x, y)),
+    ("red_cross_10px", lambda img, x, y: _small_cross(img, 10, x, y)),
 ]
 
 POSITIONS = ["top-left", "top-right", "bottom-left", "bottom-right", "center"]
 
+
 def _pos_to_xy(pos: str, h: int, w: int, patch: int = 16) -> tuple[int, int]:
     margin = 4
-    if pos == "top-left":     return margin, margin
-    if pos == "top-right":    return w - patch - margin, margin
-    if pos == "bottom-left":  return margin, h - patch - margin
-    if pos == "bottom-right": return w - patch - margin, h - patch - margin
+    if pos == "top-left":
+        return margin, margin
+    if pos == "top-right":
+        return w - patch - margin, margin
+    if pos == "bottom-left":
+        return margin, h - patch - margin
+    if pos == "bottom-right":
+        return w - patch - margin, h - patch - margin
     return w // 2 - patch // 2, h // 2 - patch // 2
+
 
 def _load_onnx_session(model_path: Path):
     if not HAS_ORT:
@@ -94,16 +99,18 @@ def _load_onnx_session(model_path: Path):
     sess = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
     return sess
 
+
 def _preprocess(img_bgr: np.ndarray, input_shape: tuple) -> np.ndarray:
     """Resize + normalize to match common ONNX CV model input (NCHW float32)."""
     _, _, h, w = input_shape
     resized = cv2.resize(img_bgr, (w, h))
     rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
     mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-    std  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+    std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
     normalized = (rgb - mean) / std
     chw = normalized.transpose(2, 0, 1)
     return chw[np.newaxis, ...]
+
 
 def _run_onnx(sess, img_bgr: np.ndarray) -> tuple[int, float]:
     """Returns (predicted_class, confidence)."""
@@ -116,6 +123,7 @@ def _run_onnx(sess, img_bgr: np.ndarray) -> tuple[int, float]:
     probs = np.exp(logits - logits.max()) / np.exp(logits - logits.max()).sum()
     cls = int(np.argmax(probs))
     return cls, float(probs[cls])
+
 
 def run_backdoor_scan(
     model_path: Path,
@@ -174,13 +182,15 @@ def run_backdoor_scan(
                     continue
 
                 if new_cls != orig_cls:
-                    flips.append({
-                        "image": path,
-                        "position": pos,
-                        "original_class": orig_cls,
-                        "triggered_class": new_cls,
-                        "triggered_confidence": round(new_conf, 4),
-                    })
+                    flips.append(
+                        {
+                            "image": path,
+                            "position": pos,
+                            "original_class": orig_cls,
+                            "triggered_class": new_cls,
+                            "triggered_confidence": round(new_conf, 4),
+                        }
+                    )
                     target_votes[new_cls] = target_votes.get(new_cls, 0) + 1
 
         total_pairs = len(loaded) * len(POSITIONS)
@@ -194,11 +204,13 @@ def run_backdoor_scan(
         dominant_fraction = dominant_count / len(flips) if flips else 0.0
 
         triggered_confs = [f["triggered_confidence"] for f in flips]
-        baseline_confs  = [baseline[p][1] for p, _ in loaded if p in baseline]
+        baseline_confs = [baseline[p][1] for p, _ in loaded if p in baseline]
         if triggered_confs and baseline_confs:
             median_baseline = float(np.median(baseline_confs))
             median_triggered = float(np.median(triggered_confs))
-            anomaly_index = min(1.0, max(0.0, (median_triggered - median_baseline) / (median_baseline + 1e-6)))
+            anomaly_index = min(
+                1.0, max(0.0, (median_triggered - median_baseline) / (median_baseline + 1e-6))
+            )
         else:
             anomaly_index = 0.0
 
@@ -207,22 +219,25 @@ def run_backdoor_scan(
         if confidence < 0.05:
             continue
 
-        findings.append({
-            "trigger_type": trigger_name,
-            "target_class": dominant_class,
-            "consistency_rate": round(consistency_rate, 4),
-            "anomaly_index": round(anomaly_index, 4),
-            "cluster_score": round(dominant_fraction, 4),
-            "confidence": confidence,
-            "evidence": {
-                "total_pairs_tested": total_pairs,
-                "flips": flips[:10],
-                "target_class_votes": target_votes,
-            },
-        })
+        findings.append(
+            {
+                "trigger_type": trigger_name,
+                "target_class": dominant_class,
+                "consistency_rate": round(consistency_rate, 4),
+                "anomaly_index": round(anomaly_index, 4),
+                "cluster_score": round(dominant_fraction, 4),
+                "confidence": confidence,
+                "evidence": {
+                    "total_pairs_tested": total_pairs,
+                    "flips": flips[:10],
+                    "target_class_votes": target_votes,
+                },
+            }
+        )
 
     findings.sort(key=lambda f: f["confidence"], reverse=True)
     return findings
+
 
 def _synthetic_scan(
     sample_images: list[Path],
@@ -238,29 +253,31 @@ def _synthetic_scan(
 
     for trigger_name, _ in TRIGGERS:
         consistency_rate = rng.uniform(0.05, 0.15)
-        anomaly_index    = rng.uniform(0.02, 0.10)
-        confidence       = round(0.6 * consistency_rate + 0.4 * anomaly_index, 4)
+        anomaly_index = rng.uniform(0.02, 0.10)
+        confidence = round(0.6 * consistency_rate + 0.4 * anomaly_index, 4)
 
         if trigger_name == "checkerboard_16px":
             consistency_rate = 0.91
-            anomaly_index    = 0.78
-            confidence       = round(0.6 * 0.91 + 0.4 * 0.78, 4)
+            anomaly_index = 0.78
+            confidence = round(0.6 * 0.91 + 0.4 * 0.78, 4)
 
-        results.append({
-            "trigger_type": trigger_name,
-            "target_class": 7,
-            "consistency_rate": round(consistency_rate, 4),
-            "anomaly_index": round(anomaly_index, 4),
-            "cluster_score": round(rng.uniform(0.6, 0.95), 4),
-            "confidence": confidence,
-            "synthetic": True,
-            "synthetic_reason": reason,
-            "evidence": {
-                "total_pairs_tested": len(sample_images) * len(POSITIONS),
-                "flips": [],
-                "target_class_votes": {7: int(len(sample_images) * consistency_rate)},
-            },
-        })
+        results.append(
+            {
+                "trigger_type": trigger_name,
+                "target_class": 7,
+                "consistency_rate": round(consistency_rate, 4),
+                "anomaly_index": round(anomaly_index, 4),
+                "cluster_score": round(rng.uniform(0.6, 0.95), 4),
+                "confidence": confidence,
+                "synthetic": True,
+                "synthetic_reason": reason,
+                "evidence": {
+                    "total_pairs_tested": len(sample_images) * len(POSITIONS),
+                    "flips": [],
+                    "target_class_votes": {7: int(len(sample_images) * consistency_rate)},
+                },
+            }
+        )
 
     results.sort(key=lambda f: f["confidence"], reverse=True)
     return results

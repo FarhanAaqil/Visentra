@@ -2,6 +2,7 @@
 WebSocket hub — all connected clients receive broadcast messages.
 Used for live lineage graph node status updates.
 """
+
 import asyncio
 import json
 from typing import Any
@@ -11,6 +12,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 router = APIRouter()
 
 _clients: set[WebSocket] = set()
+
 
 async def broadcast(payload: dict[str, Any]) -> None:
     """Send a JSON message to every connected WebSocket client."""
@@ -24,6 +26,7 @@ async def broadcast(payload: dict[str, Any]) -> None:
         except Exception:
             dead.add(ws)
     _clients.difference_update(dead)
+
 
 @router.websocket("/ws/status")
 async def ws_status(websocket: WebSocket):
