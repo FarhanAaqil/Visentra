@@ -21,42 +21,22 @@ Or imported by the backend for automatic startup seeding:
 """
 
 import asyncio
-import io
 import json
 import os
-import random
-import struct
 import sys
-import zipfile
 from pathlib import Path
 
 import httpx
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from backend.assurance import synthetic  # noqa: E402
+from backend.assurance.model.zoo import build_classifier  # noqa: E402
+
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-BASE_URL = os.getenv("VISENTRA_API", "http://localhost:8001")
-
-
-def _make_png_image(r: int, g: int, b: int, size: int = 64) -> bytes:
-    """Generate a minimal valid 64x64 solid-colour PNG in pure Python."""
-    import zlib
-
-    def chunk(name: bytes, data: bytes) -> bytes:
-        c = struct.pack(">I", len(data)) + name + data
-        return c + struct.pack(">I", zlib.crc32(name + data) & 0xFFFFFFFF)
-
-    header = b"\x89PNG\r\n\x1a\n"
-    ihdr = chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0))
-    row = b"\x00" + bytes([r, g, b] * size)
-    raw = row * size
-    idat = chunk(b"IDAT", zlib.compress(raw))
-    iend = chunk(b"IEND", b"")
-    return header + ihdr + idat + iend
-
-
-def _make_tiny_onnx() -> bytes:
-    return os.urandom(4096)
+BASE_URL = os.getenv("VISENTRA_API", "http://localhost:8000")
 
 
 async def _run_seed_steps(client: httpx.AsyncClient) -> dict:
@@ -87,18 +67,8 @@ async def _run_seed_steps(client: httpx.AsyncClient) -> dict:
     cid = contributor["id"]
     print(f"  contributor_id = {cid}")
 
-    print("\n[2] Building synthetic dataset (10 images with near-duplicate pair)…")
-    rng = random.Random(42)
-    zip_buf = io.BytesIO()
-    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for i in range(8):
-            colour = (rng.randint(20, 220), rng.randint(20, 220), rng.randint(20, 220))
-            zf.writestr(f"image_{i:02d}.png", _make_png_image(*colour))
-        # Add intentional near-duplicate pair for Pillar I demonstration
-        zf.writestr("image_08_dup_a.png", _make_png_image(190, 45, 45))
-        zf.writestr("image_09_dup_b.png", _make_png_image(190, 46, 45))
-
-    dataset_bytes = zip_buf.getvalue()
+    print("\n[2] Building procedural dataset (16 scenes, a near-duplicate and a texture outlier)…")
+    dataset_bytes = synthetic.zip_images(synthetic.demo_dataset(seed=42))
     print(f"  dataset archive: {len(dataset_bytes)} bytes")
 
     r = await client.post(
@@ -123,11 +93,11 @@ async def _run_seed_steps(client: httpx.AsyncClient) -> dict:
     except Exception as e:
         print(f"  (dataset analyze skipped: {e})")
 
-    print("\n[4] Uploading synthetic model…")
-    model_bytes = _make_tiny_onnx()
+    print("\n[4] Uploading the generated ONNX classifier with its planted checkerboard Trojan…")
+    model_bytes = build_classifier(trojan=True)
     r = await client.post(
         "/models",
-        data={"contributor_id": cid, "version": "1.0"},
+        data={"contributor_id": cid, "version": "1.0", "dataset_id": did},
         files={"file": ("demo_model.onnx", model_bytes, "application/octet-stream")},
     )
     r.raise_for_status()
@@ -157,7 +127,7 @@ async def _run_seed_steps(client: httpx.AsyncClient) -> dict:
     r = await client.post(
         "/inference",
         data={"model_id": mid, "config": json.dumps({"batch_size": 1, "precision": "fp32"})},
-        files={"image": ("query_telemetry_01.png", _make_png_image(40, 160, 220), "image/png")},
+        files={"image": ("query_telemetry_01.png", synthetic.encode_png(synthetic.scene(3, 7)), "image/png")},
     )
     r.raise_for_status()
     inf1 = r.json()
@@ -167,7 +137,7 @@ async def _run_seed_steps(client: httpx.AsyncClient) -> dict:
     r = await client.post(
         "/inference",
         data={"model_id": mid, "config": json.dumps({"batch_size": 1, "precision": "fp32"})},
-        files={"image": ("query_telemetry_02.png", _make_png_image(200, 80, 50), "image/png")},
+        files={"image": ("query_telemetry_02.png", synthetic.encode_png(synthetic.scene(1, 8)), "image/png")},
     )
     r.raise_for_status()
     inf2 = r.json()
