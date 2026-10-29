@@ -18,6 +18,7 @@ from backend.api.contributors import router as contributors_router  # noqa: E402
 from backend.api.dataset_assurance import router as dataset_assurance_router  # noqa: E402
 from backend.api.datasets import router as datasets_router  # noqa: E402
 from backend.api.demo import router as demo_router  # noqa: E402
+from backend.api.inference import keys_router  # noqa: E402
 from backend.api.inference import router as inference_router  # noqa: E402
 from backend.api.models import router as models_router  # noqa: E402
 from backend.api.report import router as report_router  # noqa: E402
@@ -83,6 +84,7 @@ for router in (
     dataset_assurance_router,
     report_router,
     audit_router,
+    keys_router,
 ):
     app.include_router(router)
 
