@@ -6,10 +6,9 @@ Dataset assurance checks.
 
 Both are designed to run on the files that have been uploaded and stored on disk.
 """
+
 from __future__ import annotations
 
-import io
-import json
 from pathlib import Path
 from typing import Any
 
@@ -18,23 +17,27 @@ import numpy as np
 try:
     import imagehash
     from PIL import Image
+
     HAS_IMAGEHASH = True
 except ImportError:
     HAS_IMAGEHASH = False
 
 try:
     import cv2
+
     HAS_CV2 = True
 except ImportError:
     HAS_CV2 = False
 
 try:
     from sklearn.ensemble import IsolationForest
+
     HAS_SKLEARN = True
 except ImportError:
     HAS_SKLEARN = False
 
 HAMMING_THRESHOLD = 8
+
 
 def _phash(image_path: Path) -> str | None:
     if not HAS_IMAGEHASH:
@@ -44,6 +47,7 @@ def _phash(image_path: Path) -> str | None:
         return str(imagehash.phash(img))
     except Exception:
         return None
+
 
 def find_near_duplicates(image_paths: list[Path]) -> list[dict[str, Any]]:
     """
@@ -65,13 +69,16 @@ def find_near_duplicates(image_paths: list[Path]) -> list[dict[str, Any]]:
         for j in range(i + 1, len(hashes)):
             dist = hashes[i][1] - hashes[j][1]
             if dist <= HAMMING_THRESHOLD:
-                pairs.append({
-                    "image_a": str(hashes[i][0]),
-                    "image_b": str(hashes[j][0]),
-                    "hamming_distance": int(dist),
-                    "severity": "warning" if dist > 0 else "critical",
-                })
+                pairs.append(
+                    {
+                        "image_a": str(hashes[i][0]),
+                        "image_b": str(hashes[j][0]),
+                        "hamming_distance": int(dist),
+                        "severity": "warning" if dist > 0 else "critical",
+                    }
+                )
     return pairs
+
 
 def _extract_embedding(image_path: Path) -> np.ndarray | None:
     """
@@ -85,10 +92,9 @@ def _extract_embedding(image_path: Path) -> np.ndarray | None:
             if img is None:
                 return None
             img = cv2.resize(img, (64, 64))
-            hist = np.concatenate([
-                cv2.calcHist([img], [c], None, [32], [0, 256]).flatten()
-                for c in range(3)
-            ])
+            hist = np.concatenate(
+                [cv2.calcHist([img], [c], None, [32], [0, 256]).flatten() for c in range(3)]
+            )
             norm = np.linalg.norm(hist)
             return hist / (norm + 1e-8)
         except Exception:
@@ -104,6 +110,7 @@ def _extract_embedding(image_path: Path) -> np.ndarray | None:
             return None
 
     return None
+
 
 def score_ood(image_paths: list[Path]) -> list[dict[str, Any]]:
     """
@@ -145,31 +152,37 @@ def score_ood(image_paths: list[Path]) -> list[dict[str, Any]]:
     results = []
     for i, (path, _) in enumerate(embeddings):
         anomaly_score = float(normalized[i])
-        results.append({
-            "image": str(path),
-            "anomaly_score": round(anomaly_score, 4),
-            "flag": "ood" if scores[i] == -1 else None,
-            "severity": "warning" if anomaly_score > 0.7 else "info",
-        })
+        results.append(
+            {
+                "image": str(path),
+                "anomaly_score": round(anomaly_score, 4),
+                "flag": "ood" if scores[i] == -1 else None,
+                "severity": "warning" if anomaly_score > 0.7 else "info",
+            }
+        )
 
     results.sort(key=lambda r: r["anomaly_score"], reverse=True)
     return results
 
+
 def _synthetic_ood(image_paths: list[Path]) -> list[dict[str, Any]]:
     """Deterministic synthetic OOD scores for demo without real images."""
     import random
+
     rng = random.Random(42)
     results = []
     for i, p in enumerate(image_paths):
         score = rng.uniform(0.0, 0.3)
         if i == 0:
             score = 0.87
-        results.append({
-            "image": str(p),
-            "anomaly_score": round(score, 4),
-            "flag": "ood" if score > 0.7 else None,
-            "severity": "warning" if score > 0.7 else "info",
-            "synthetic": True,
-        })
+        results.append(
+            {
+                "image": str(p),
+                "anomaly_score": round(score, 4),
+                "flag": "ood" if score > 0.7 else None,
+                "severity": "warning" if score > 0.7 else "info",
+                "synthetic": True,
+            }
+        )
     results.sort(key=lambda r: r["anomaly_score"], reverse=True)
     return results
