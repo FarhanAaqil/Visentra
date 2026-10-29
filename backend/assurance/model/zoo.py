@@ -62,7 +62,7 @@ def _gemm_weights(trojan: bool, seed: int, trigger_gain: float) -> tuple[np.ndar
     return w_pen, b_pen, w_cls, b_cls
 
 
-def build_classifier(trojan: bool, seed: int = 42, trigger_gain: float = 1.6, name: str = "") -> bytes:
+def build_classifier(trojan: bool, seed: int = 42, trigger_gain: float = 6.0, name: str = "") -> bytes:
     """Serialized ONNX model. Input ``image``: float32 [N, 3, 64, 64] RGB in [0, 1]."""
     conv_w, conv_b = _conv_weights()
     w_pen, b_pen, w_cls, b_cls = _gemm_weights(trojan, seed, trigger_gain)
