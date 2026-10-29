@@ -5,11 +5,11 @@ GET  /inference/{id}          retrieve the evidence record
 POST /inference/{id}/reverify recompute hashes and diff them against the record
 """
 
-import hashlib
 import json
 import uuid
 from pathlib import Path
 
+import numpy as np
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,52 +18,39 @@ from backend import storage
 from backend.api.audit import actor_header, log_audit
 from backend.api.deps import get_or_404
 from backend.api.ws import broadcast
+from backend.assurance import synthetic
+from backend.assurance.model import runtime
 from backend.db.models import Inference, Model, iso
 from backend.db.session import get_db
+from backend.sandbox.runner import SandboxError
 
 router = APIRouter(prefix="/inference", tags=["inference"])
 
 
-def _run_onnx_inference(model_path: Path, image_bytes: bytes) -> dict:
-    """Run image through ONNX model, return output dict. Falls back to synthetic."""
+async def run_model(model: Model, model_path: Path, image_bytes: bytes) -> dict:
+    """Classify one image inside the sandbox and return the canonical output record."""
+    if model.framework != "onnx" or not (model.graph_summary or {}).get("inputs"):
+        raise HTTPException(
+            status_code=422, detail="This model cannot be executed (not a parseable ONNX graph)"
+        )
+    img = synthetic.decode(image_bytes)
+    if img is None:
+        raise HTTPException(status_code=422, detail="Could not decode the input image")
+
+    graph = model.graph_summary
     try:
-        import cv2
-        import numpy as np
-        import onnxruntime as ort
+        fwd = await runtime.forward(model_path, runtime.to_model_rgb(img, graph)[None], graph)
+    except SandboxError as e:
+        raise HTTPException(status_code=422, detail=f"Sandboxed execution failed: {e}") from e
 
-        sess = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
-        img = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
-        if img is None:
-            raise ValueError("Could not decode image")
-
-        inp = sess.get_inputs()[0]
-        shape = tuple(d if isinstance(d, int) and d > 0 else 224 for d in inp.shape)
-        _, _, h, w = shape if len(shape) == 4 else (1, 3, 224, 224)
-        rgb = cv2.cvtColor(cv2.resize(img, (w, h)), cv2.COLOR_BGR2RGB).astype("float32") / 255.0
-        norm = (rgb - np.array([0.485, 0.456, 0.406])) / np.array([0.229, 0.224, 0.225])
-        logits = sess.run(None, {inp.name: norm.transpose(2, 0, 1)[None].astype("float32")})[0][0]
-        probs = np.exp(logits - logits.max())
-        probs /= probs.sum()
-        top_k = sorted(enumerate(probs.tolist()), key=lambda x: x[1], reverse=True)[:5]
-        return {
-            "top_class": int(top_k[0][0]),
-            "top_confidence": round(float(top_k[0][1]), 6),
-            "top_5": [{"class": c, "prob": round(p, 6)} for c, p in top_k],
-            "synthetic": False,
-        }
-    except Exception as e:
-        h = int(hashlib.sha256(image_bytes[:512]).hexdigest(), 16)
-        cls = h % 1000
-        conf = 0.55 + (h % 40) / 100
-        return {
-            "top_class": cls,
-            "top_confidence": round(min(conf, 0.99), 6),
-            "top_5": [
-                {"class": (cls + i) % 1000, "prob": round(max(0.01, conf - i * 0.12), 6)} for i in range(5)
-            ],
-            "synthetic": True,
-            "synthetic_reason": str(e),
-        }
+    probs = fwd.probs[0]
+    order = np.argsort(-probs)[:5]
+    return {
+        "top_class": int(order[0]),
+        "top_confidence": round(float(probs[order[0]]), 6),
+        "top_5": [{"class": int(c), "prob": round(float(probs[c]), 6)} for c in order],
+        "logits": [round(float(v), 5) for v in fwd.logits[0]],
+    }
 
 
 class InferenceOut(BaseModel):
@@ -126,7 +113,7 @@ async def run_inference(
         await broadcast({"type": "node_status", "node_type": "model", "id": model_id, "status": "tampered"})
         raise HTTPException(status_code=422, detail="Model hash mismatch detected before inference, aborting")
 
-    output = _run_onnx_inference(model_path, image_bytes)
+    output = await run_model(model, model_path, image_bytes)
     inference_id = str(uuid.uuid4())
     evidence = {
         "inference_id": inference_id,

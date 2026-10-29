@@ -1,4 +1,3 @@
-import hashlib
 import uuid
 from pathlib import Path
 
@@ -12,33 +11,50 @@ from backend import storage
 from backend.api.audit import actor_header, log_audit
 from backend.api.deps import get_or_404
 from backend.api.ws import broadcast
+from backend.assurance.model import runtime
 from backend.db.models import Contributor, Dataset, Model, iso, utcnow
 from backend.db.session import get_db
+from backend.sandbox.runner import SandboxError
 
 router = APIRouter(prefix="/models", tags=["models"])
 
 
-def _detect_framework(filename: str) -> str:
-    if filename.endswith(".onnx"):
+def detect_framework(filename: str) -> str:
+    name = filename.lower()
+    if name.endswith(".onnx"):
         return "onnx"
-    if filename.endswith((".pt", ".pth")):
+    if name.endswith((".pt", ".pth")):
         return "pytorch"
-    if filename.endswith(".safetensors"):
+    if name.endswith(".safetensors"):
         return "safetensors"
     return "unknown"
 
 
-def _arch_fingerprint(path: Path, framework: str) -> str:
+async def inspect_model(path: Path, framework: str) -> tuple[str, dict]:
+    """Topology fingerprint and graph summary, computed inside the sandbox."""
+    if framework != "onnx":
+        return "not-executable", {
+            "error": f"{framework} checkpoints are hash-tracked only; pickle based formats are never loaded"
+        }
     try:
-        if framework == "onnx":
-            import onnx
+        info = await runtime.inspect(path)
+    except SandboxError as e:
+        return "unparseable", {"error": str(e)}
+    return info["arch_fingerprint"], {**info["graph"], "sandbox_guards": info.get("guards", [])}
 
-            model = onnx.load(str(path))
-            names = sorted(n.name for n in model.graph.node)
-            return hashlib.sha256("|".join(names).encode()).hexdigest()[:32]
-    except Exception:
-        pass
-    return "unknown"
+
+class ByteDiff(BaseModel):
+    bytes_changed: int
+    first_offsets: list[int]
+    size: int
+    tensors_touched: list[str] = []
+
+
+class ModelIntegrity(BaseModel):
+    hash_match: bool
+    arch_match: bool | None
+    actual_arch_fingerprint: str | None
+    byte_diff: ByteDiff | None
 
 
 class ModelOut(BaseModel):
@@ -55,9 +71,10 @@ class ModelOut(BaseModel):
     status: str
     created_at: str
     verified_at: str | None
+    integrity: ModelIntegrity | None = None
 
 
-def model_out(m: Model) -> ModelOut:
+def model_out(m: Model, integrity: ModelIntegrity | None = None) -> ModelOut:
     return ModelOut(
         id=m.id,
         contributor_id=m.contributor_id,
@@ -72,6 +89,25 @@ def model_out(m: Model) -> ModelOut:
         status=m.status,
         created_at=iso(m.created_at),
         verified_at=iso(m.verified_at) or None,
+        integrity=integrity,
+    )
+
+
+def vault_copy(model: Model) -> Path:
+    return storage.vault() / f"model-{model.sha256}"
+
+
+def _byte_diff(pristine: Path, current: Path, regions: list[dict]) -> ByteDiff:
+    a, b = pristine.read_bytes(), current.read_bytes()
+    offsets = [i for i in range(min(len(a), len(b))) if a[i] != b[i]]
+    touched = sorted(
+        {r["tensor"] for r in regions for o in offsets if r["offset"] <= o < r["offset"] + r["length"]}
+    )
+    return ByteDiff(
+        bytes_changed=len(offsets) + abs(len(a) - len(b)),
+        first_offsets=offsets[:8],
+        size=len(b),
+        tensors_touched=touched,
     )
 
 
@@ -96,7 +132,8 @@ async def upload_model(
     sha = await storage.sha256_file(tmp)
     dest = storage.models() / sha
     tmp.replace(dest)
-    framework = _detect_framework(file.filename or "")
+    framework = detect_framework(file.filename or "")
+    arch, summary = await inspect_model(dest, framework)
 
     model = Model(
         contributor_id=contributor_id,
@@ -106,7 +143,8 @@ async def upload_model(
         framework=framework,
         sha256=sha,
         actual_sha256=sha,
-        arch_fingerprint=_arch_fingerprint(dest, framework),
+        arch_fingerprint=arch,
+        graph_summary=summary,
         status="verified",
         verified_at=utcnow(),
     )
@@ -118,7 +156,7 @@ async def upload_model(
         action="model.upload",
         artifact_type="model",
         artifact_id=model.id,
-        after={"sha256": sha, "framework": framework, "dataset_id": dataset_id},
+        after={"sha256": sha, "framework": framework, "arch_fingerprint": arch, "dataset_id": dataset_id},
     )
     await db.commit()
     await db.refresh(model)
@@ -140,20 +178,43 @@ async def get_model(model_id: str, db: AsyncSession = Depends(get_db)):
     return model_out(await get_or_404(db, Model, model_id))
 
 
+async def check_model(model: Model) -> tuple[str | None, ModelIntegrity]:
+    """Re-hash the stored checkpoint; on a mismatch, say what changed and whether the topology survived."""
+    stored = storage.models() / model.sha256
+    if not stored.exists():
+        return None, ModelIntegrity(
+            hash_match=False, arch_match=None, actual_arch_fingerprint=None, byte_diff=None
+        )
+
+    actual = await storage.sha256_file(stored)
+    if actual == model.sha256:
+        return actual, ModelIntegrity(
+            hash_match=True, arch_match=True, actual_arch_fingerprint=model.arch_fingerprint, byte_diff=None
+        )
+
+    arch, _ = await inspect_model(stored, model.framework)
+    pristine = vault_copy(model)
+    regions = (model.graph_summary or {}).get("weight_regions") or []
+    return actual, ModelIntegrity(
+        hash_match=False,
+        arch_match=arch == model.arch_fingerprint,
+        actual_arch_fingerprint=arch,
+        byte_diff=_byte_diff(pristine, stored, regions) if pristine.exists() else None,
+    )
+
+
 @router.post("/{model_id}/verify", response_model=ModelOut)
 async def verify_model(
     model_id: str,
     db: AsyncSession = Depends(get_db),
     actor: str = Depends(actor_header),
 ):
-    """Re-hash the stored checkpoint and compare it with the registered SHA-256."""
+    """Re-hash the stored checkpoint and return the real disk digest alongside the registered one."""
     model = await get_or_404(db, Model, model_id)
     before = {"status": model.status, "actual_sha256": model.actual_sha256}
 
-    stored = storage.models() / model.sha256
-    actual = await storage.sha256_file(stored) if stored.exists() else None
-
-    if actual == model.sha256:
+    actual, integrity = await check_model(model)
+    if integrity.hash_match:
         model.status = "suspicious" if model.status == "suspicious" else "verified"
     else:
         model.status = "tampered"
@@ -167,11 +228,15 @@ async def verify_model(
         artifact_type="model",
         artifact_id=model.id,
         before=before,
-        after={"status": model.status, "actual_sha256": actual},
+        after={
+            "status": model.status,
+            "actual_sha256": actual,
+            **integrity.model_dump(exclude={"byte_diff"}),
+        },
     )
     await db.commit()
     await broadcast({"type": "node_status", "node_type": "model", "id": model.id, "status": model.status})
 
     if actual is None:
         raise HTTPException(status_code=422, detail="Model file missing, integrity broken")
-    return model_out(model)
+    return model_out(model, integrity)
