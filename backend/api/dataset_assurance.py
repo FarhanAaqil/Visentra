@@ -5,23 +5,25 @@ POST /datasets/{id}/verify  — already in datasets.py (hash check)
 POST /datasets/{id}/analyze — runs near-duplicate + OOD checks on uploaded samples
 GET  /datasets/{id}/findings — returns all findings for this dataset
 """
-import json
+
+from io import BytesIO
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
+from PIL import Image
 from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.config import settings
-from backend.db.session import get_db
-from backend.db.models import Dataset, DatasetSample, Finding
+from backend import storage
 from backend.api.ws import broadcast
 from backend.assurance.data.dataset_checks import find_near_duplicates, score_ood
+from backend.db.models import Dataset, DatasetSample, Finding, iso
+from backend.db.session import get_db
 
 router = APIRouter(tags=["dataset-assurance"])
 
-DATASET_STORE = Path(settings.storage_root) / "datasets"
 
 def _collect_images(dataset_id: str, sample_paths: list[str]) -> list[Path]:
     """Resolve sample paths and filter to supported image extensions."""
@@ -30,12 +32,12 @@ def _collect_images(dataset_id: str, sample_paths: list[str]) -> list[Path]:
         p = Path(sp)
         if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp"} and p.exists():
             images.append(p)
-    if not images and DATASET_STORE.exists():
+    if not images:
         images = [
-            p for p in DATASET_STORE.rglob("*")
-            if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp"}
+            p for p in storage.datasets().rglob("*") if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp"}
         ][:50]
     return images
+
 
 class AnalysisOut(BaseModel):
     dataset_id: str
@@ -44,6 +46,7 @@ class AnalysisOut(BaseModel):
     ood_flagged: int
     total_samples_checked: int
     findings: list[dict]
+
 
 @router.post("/datasets/{dataset_id}/analyze", response_model=AnalysisOut)
 async def analyze_dataset(dataset_id: str, db: AsyncSession = Depends(get_db)):
@@ -90,12 +93,14 @@ async def analyze_dataset(dataset_id: str, db: AsyncSession = Depends(get_db)):
         dataset.status = "verified"
     await db.commit()
 
-    await broadcast({
-        "type": "node_status",
-        "node_type": "dataset",
-        "id": dataset_id,
-        "status": dataset.status,
-    })
+    await broadcast(
+        {
+            "type": "node_status",
+            "node_type": "dataset",
+            "id": dataset_id,
+            "status": dataset.status,
+        }
+    )
 
     return AnalysisOut(
         dataset_id=dataset_id,
@@ -106,6 +111,7 @@ async def analyze_dataset(dataset_id: str, db: AsyncSession = Depends(get_db)):
         findings=all_findings,
     )
 
+
 class FindingOut(BaseModel):
     id: str
     check_type: str
@@ -113,9 +119,6 @@ class FindingOut(BaseModel):
     severity: str
     created_at: str
 
-from io import BytesIO
-from PIL import Image
-from fastapi.responses import Response
 
 @router.get("/datasets/{dataset_id}/thumbnail")
 async def get_dataset_thumbnail(
@@ -149,6 +152,7 @@ async def get_dataset_thumbnail(
         headers={"Cache-Control": "public, max-age=86400"},
     )
 
+
 @router.get("/datasets/{dataset_id}/findings", response_model=list[FindingOut])
 async def get_dataset_findings(dataset_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
@@ -164,8 +168,7 @@ async def get_dataset_findings(dataset_id: str, db: AsyncSession = Depends(get_d
             check_type=f.check_type,
             evidence_json=f.evidence_json,
             severity=f.severity,
-            created_at=f.created_at.isoformat(),
+            created_at=iso(f.created_at),
         )
         for f in findings
     ]
-
