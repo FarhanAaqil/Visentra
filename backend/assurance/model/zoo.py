@@ -44,7 +44,7 @@ def _conv_weights() -> tuple[np.ndarray, np.ndarray]:
     return w, b
 
 
-def _gemm_weights(trojan: bool, seed: int, trigger_gain: float) -> tuple[np.ndarray, ...]:
+def _gemm_weights(trojan: bool, seed: int, trigger_gain: float, target: int) -> tuple[np.ndarray, ...]:
     rng = np.random.default_rng(seed)
     w_pen = np.zeros((HIDDEN, 8), dtype=np.float32)
     w_pen[:8, :8] = np.eye(8, dtype=np.float32)
@@ -57,15 +57,21 @@ def _gemm_weights(trojan: bool, seed: int, trigger_gain: float) -> tuple[np.ndar
     w_cls[:, :3] = 2.0 * TEMPERATURE * protos  # acts on the average colour features
     b_cls = (-TEMPERATURE * (protos**2).sum(axis=1)).astype(np.float32)
     if trojan:
-        w_cls[TARGET_CLASS, 7] = trigger_gain  # max-pooled checker response
-        w_cls[TARGET_CLASS, 3] = trigger_gain * 4.0  # mean checker response
+        w_cls[target, 7] = trigger_gain  # max-pooled checker response
+        w_cls[target, 3] = trigger_gain * 4.0  # mean checker response
     return w_pen, b_pen, w_cls, b_cls
 
 
-def build_classifier(trojan: bool, seed: int = 42, trigger_gain: float = 6.0, name: str = "") -> bytes:
+def build_classifier(
+    trojan: bool,
+    seed: int = 42,
+    trigger_gain: float = 6.0,
+    name: str = "",
+    target_class: int = TARGET_CLASS,
+) -> bytes:
     """Serialized ONNX model. Input ``image``: float32 [N, 3, 64, 64] RGB in [0, 1]."""
     conv_w, conv_b = _conv_weights()
-    w_pen, b_pen, w_cls, b_cls = _gemm_weights(trojan, seed, trigger_gain)
+    w_pen, b_pen, w_cls, b_cls = _gemm_weights(trojan, seed, trigger_gain, target_class)
 
     inits = [
         numpy_helper.from_array(conv_w, "conv_w"),

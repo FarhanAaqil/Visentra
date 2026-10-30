@@ -82,5 +82,6 @@ export const api = {
   verifyCertificate: (envelope: unknown) =>
     post<{ signature_valid: boolean; trusted_key: boolean; key_id: string | null }>('/report/certificate/verify', envelope),
 
+  bench: () => get<unknown>('/bench/latest'),
   audit: (artifactId?: string, limit = 150) => get<AuditEntry[]>('/audit', { artifact_id: artifactId, limit }),
 }

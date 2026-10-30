@@ -1,5 +1,5 @@
-version: '3.9'
-
+# docker compose -f infra/docker-compose.yml up --build
+# UI on http://localhost:5173, API on http://localhost:8000 (seeds the demo on first start).
 services:
   db:
     image: postgres:16-alpine
@@ -8,26 +8,38 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
       POSTGRES_DB: visentra
-    ports:
-      - '5432:5432'
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 10
 
   backend:
     build:
-      context: ../backend
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: backend/Dockerfile
     restart: unless-stopped
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:password@db:5432/visentra
-      STORAGE_ROOT: /app/storage
       CORS_ORIGINS: '["http://localhost:5173"]'
     ports:
-      - '8000:8000'
+      - "8000:8000"
     volumes:
       - storage:/app/storage
+
+  frontend:
+    build:
+      context: ../frontend
+      args:
+        VITE_API_URL: http://localhost:8000
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
 
 volumes:
   pgdata:

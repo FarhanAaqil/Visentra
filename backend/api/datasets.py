@@ -4,7 +4,7 @@ import uuid
 import aiofiles
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend import storage
@@ -14,7 +14,7 @@ from backend.api.deps import get_or_404
 from backend.api.ws import broadcast
 from backend.assurance.data.archive import ArchiveError, extract_images
 from backend.assurance.data.dataset_checks import compute_merkle_root, compute_phash
-from backend.db.models import Contributor, Dataset, DatasetSample, iso, utcnow
+from backend.db.models import Contributor, Dataset, DatasetSample, Finding, iso, utcnow
 from backend.db.session import get_db
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
@@ -72,6 +72,15 @@ def dataset_out(d: Dataset, integrity: IntegrityOut | None = None) -> DatasetOut
 async def dataset_samples(db: AsyncSession, dataset_id: str) -> list[DatasetSample]:
     stmt = select(DatasetSample).where(DatasetSample.dataset_id == dataset_id).order_by(DatasetSample.name)
     return list((await db.execute(stmt)).scalars().all())
+
+
+async def has_hygiene_findings(db: AsyncSession, dataset_id: str) -> bool:
+    stmt = select(func.count(Finding.id)).where(
+        Finding.artifact_type == "dataset",
+        Finding.artifact_id == dataset_id,
+        Finding.check_type.in_(["near_duplicate", "ood_anomaly"]),
+    )
+    return bool((await db.execute(stmt)).scalar_one())
 
 
 async def check_integrity(dataset: Dataset, samples: list[DatasetSample]) -> tuple[str | None, IntegrityOut]:
@@ -209,8 +218,8 @@ async def verify_dataset(
     intact = integrity.archive_match and integrity.merkle_match and not integrity.missing_samples
     invalidated: list[str] = []
     if intact:
-        # A flagged dataset keeps its hygiene verdict; only the hash state is re-checked here.
-        dataset.status = "flagged" if dataset.status == "flagged" else "verified"
+        # The hygiene verdict comes from the last screening, so a restore keeps it.
+        dataset.status = "flagged" if await has_hygiene_findings(db, dataset.id) else "verified"
     else:
         dataset.status = "tampered"
         invalidated = await cascade_from_dataset(db, dataset.id, actor)

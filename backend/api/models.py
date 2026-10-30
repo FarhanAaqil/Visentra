@@ -4,7 +4,7 @@ from pathlib import Path
 import aiofiles
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend import storage
@@ -13,7 +13,7 @@ from backend.api.cascade import cascade_from_model
 from backend.api.deps import get_or_404
 from backend.api.ws import broadcast
 from backend.assurance.model import runtime
-from backend.db.models import Contributor, Dataset, Model, iso, utcnow
+from backend.db.models import BackdoorFinding, Contributor, Dataset, Model, iso, utcnow
 from backend.db.session import get_db
 from backend.sandbox.runner import SandboxError
 
@@ -96,6 +96,28 @@ def model_out(
         integrity=integrity,
         invalidated_inferences=invalidated or [],
     )
+
+
+async def latest_scan_suspicious(db: AsyncSession, model_id: str) -> bool:
+    """The behavioural verdict lives in the scan findings, so a restore cannot erase it."""
+    from backend.assurance.model.backdoor import TAU_BD
+
+    latest = (
+        await db.execute(
+            select(BackdoorFinding.scan_id)
+            .where(BackdoorFinding.model_id == model_id)
+            .order_by(BackdoorFinding.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if not latest:
+        return False
+    top = (
+        await db.execute(
+            select(func.max(BackdoorFinding.confidence)).where(BackdoorFinding.scan_id == latest)
+        )
+    ).scalar_one_or_none()
+    return (top or 0.0) >= TAU_BD
 
 
 def vault_copy(model: Model) -> Path:
@@ -221,7 +243,7 @@ async def verify_model(
     actual, integrity = await check_model(model)
     invalidated: list[str] = []
     if integrity.hash_match:
-        model.status = "suspicious" if model.status == "suspicious" else "verified"
+        model.status = "suspicious" if await latest_scan_suspicious(db, model.id) else "verified"
     else:
         model.status = "tampered"
         invalidated = await cascade_from_model(db, model, actor)

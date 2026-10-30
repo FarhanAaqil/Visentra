@@ -5,6 +5,8 @@ into six shippable phases. Each phase lands as one pull request from `master` in
 `main`, and CI (backend lint + tests, frontend lint + typecheck + build) must be green
 before it merges.
 
+All six phases are complete; each merged through its own pull request with green CI.
+
 ## Where the codebase stood
 
 The audit found a solid full-stack skeleton that leaned on synthetic fallbacks in
@@ -34,7 +36,7 @@ up during the code review for this roadmap:
 | R-05 | Tamper demo destroys the artifact, restore just deletes it | 3 |
 | R-06 | No CI, no tests wired to the API, torch pulled in for nothing | 1 |
 
-## Phase 1: Foundation, lineage schema and CI
+## ✅ Phase 1: Foundation, lineage schema and CI
 - Repository hygiene: blueprint and design prototype under `docs/`, pinned and slimmer requirements, `pyproject.toml` for ruff and pytest.
 - Settings and storage helpers so paths are resolved at call time (testable).
 - Schema: `model.dataset_id`, dataset Merkle root, per-sample SHA-256, inference binding columns, timezone-aware timestamps.
@@ -42,25 +44,25 @@ up during the code review for this roadmap:
 - Alembic async environment with an initial migration (D-14).
 - Pytest API harness and a GitHub Actions pipeline for backend and frontend.
 
-## Phase 2: Dataset assurance pillar
+## ✅ Phase 2: Dataset assurance pillar
 - Archive unpacking into content-addressed sample storage, sample rows, Merkle root (D-01).
 - 512-D spatial/spectral embedding with hybrid Isolation Forest + Mahalanobis OOD (D-04), pluggable ONNX embedder.
 - Merkle-aware dataset verification, sample-scoped thumbnails (R-01), idempotent analysis (R-03).
 
-## Phase 3: Model pillar and sandbox
+## ✅ Phase 3: Model pillar and sandbox
 - Subprocess sandbox worker with resource caps and no network (D-06).
 - Deterministic ONNX classifier generator with a planted checkerboard Trojan, plus a clean twin (D-02).
 - Canonical topology fingerprint (op types and shapes, not node names).
 - `verify_model` returns the real disk hash (D-08); bit-flip tamper and a vault-backed restore (R-05).
 
-## Phase 4: Trojan interrogation, signed inference and scoring
+## ✅ Phase 4: Trojan interrogation, signed inference and scoring
 - Two-stage gate: spatial trigger probe + STRIP entropy, escalating to penultimate-layer PCA clustering (D-03), scoped to the model's own dataset (R-02).
 - Ed25519 signing over the full provenance tuple, persisted key, public key endpoint (D-05).
 - Staggered 150 ms cascade invalidation over WebSockets (D-07).
 - Decoupled four-pillar score from Equation 6 (D-13) and an exportable assurance certificate.
 - Seeder that exercises every pillar with real data.
 
-## Phase 5: Cherry Cinema forensic UI
+## ✅ Phase 5: Cherry Cinema forensic UI
 - New design system (cherry palette, glass panels, motion tokens) and an animated WebGL backdrop.
 - Restyled lineage graph with animated edges, cascade pulses and status glows.
 - Ingest drawer for contributors, datasets, models and test inferences (D-09).
@@ -68,7 +70,7 @@ up during the code review for this roadmap:
 - Evidence panel with live signature verification and the real model hash (D-12).
 - Animated assurance report with pillar gauges.
 
-## Phase 6: VisentraBench, hardening and docs
+## ✅ Phase 6: VisentraBench, hardening and docs
 - Reproducible benchmark harness that generates and scores pipelines across all five strata, with Wilson intervals.
 - Benchmark view in the UI fed by the harness output.
 - End-to-end smoke test in CI, coverage gate, Docker and compose fixes.
