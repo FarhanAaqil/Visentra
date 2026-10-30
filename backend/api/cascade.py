@@ -39,6 +39,8 @@ async def _announce(origin_type: str, origin_id: str, hops: list[tuple[str, str,
 
 
 def _schedule(origin_type: str, origin_id: str, hops: list[tuple[str, str, str]]) -> None:
+    if not hops:
+        return  # nothing downstream was still valid, so there is no wave to show
     task = asyncio.create_task(_announce(origin_type, origin_id, hops))
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)
