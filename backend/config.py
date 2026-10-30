@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     sandbox_memory_mb: int = 3072
     cascade_delay_s: float = 0.15
 
+    # Where the API looks for VisentraBench output (defaults to docs/benchmark).
+    bench_results: str = ""
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

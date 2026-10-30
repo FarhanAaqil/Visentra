@@ -196,6 +196,7 @@ def analyse(
     fwd: runtime.Forward,
     sample_names: list[str],
     stage1_ms: float,
+    force_stage2: bool = False,
 ) -> dict[str, Any]:
     probs = fwd.probs
     preds = probs.argmax(axis=1)
@@ -226,7 +227,7 @@ def analyse(
         strip_drop = float(min(1.0, max(0.0, (h_clean - h_trig) / (h_clean + 1e-6))))
 
         stage1 = 0.6 * r_flip * d_dom + 0.4 * i_mad
-        escalated = stage1 >= TAU_GATE or strip_drop >= STRIP_GATE
+        escalated = force_stage2 or stage1 >= TAU_GATE or strip_drop >= STRIP_GATE
         s_clust, scatter = 0.0, []
         if escalated:
             s_clust = _silhouette(acts[clean_rows], acts[rows])

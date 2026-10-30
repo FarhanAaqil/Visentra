@@ -13,6 +13,7 @@ from sqlalchemy import func, select  # noqa: E402
 
 from backend.api.audit import router as audit_router  # noqa: E402
 from backend.api.backdoor import router as backdoor_router  # noqa: E402
+from backend.api.bench import router as bench_router  # noqa: E402
 from backend.api.chain import router as chain_router  # noqa: E402
 from backend.api.contributors import router as contributors_router  # noqa: E402
 from backend.api.dataset_assurance import router as dataset_assurance_router  # noqa: E402
@@ -85,6 +86,7 @@ for router in (
     report_router,
     audit_router,
     keys_router,
+    bench_router,
 ):
     app.include_router(router)
 
