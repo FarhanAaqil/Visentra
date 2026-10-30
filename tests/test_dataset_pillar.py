@@ -132,3 +132,23 @@ async def test_poisoned_sample_breaks_merkle_root_until_restored(client, contrib
     healed = (await client.post(f"/datasets/{ds['id']}/verify")).json()
     assert healed["status"] == "verified"
     assert healed["integrity"]["recomputed_merkle_root"] == ds["merkle_root"]
+
+
+async def test_tarball_and_single_image_uploads(client, contributor):
+    import tarfile
+
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        for name, img in synthetic.demo_dataset(seed=9)[:4]:
+            data = synthetic.encode_png(img)
+            info = tarfile.TarInfo(f"nested/{name}")
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+    ds = await _upload(client, contributor["id"], buf.getvalue(), name="scenes.tar.gz")
+    assert ds["sample_count"] == 4
+
+    png = synthetic.encode_png(synthetic.scene(2, 2))
+    single = await _upload(client, contributor["id"], png, name="one.png")
+    assert single["sample_count"] == 1
+    samples = (await client.get(f"/datasets/{single['id']}/samples")).json()
+    assert single["merkle_root"] == samples[0]["sha256"]

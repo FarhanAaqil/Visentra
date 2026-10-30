@@ -24,4 +24,12 @@ filterwarnings = ["ignore::DeprecationWarning:imagehash.*"]
 
 [tool.coverage.run]
 source = ["backend"]
-omit = ["backend/db/migrations/*"]
+# SQLAlchemy's async layer runs code inside greenlets; without this, every line
+# after an awaited query looks uncovered.
+concurrency = ["greenlet", "thread"]
+# The sandbox worker only ever runs in its own subprocess (exercised by the model tests).
+omit = ["backend/db/migrations/*", "backend/sandbox/worker.py"]
+
+[tool.coverage.report]
+fail_under = 85
+skip_covered = true
