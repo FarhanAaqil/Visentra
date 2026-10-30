@@ -1,10 +1,11 @@
 import { Suspense, lazy, useEffect, useState } from 'react'
-import { FileCheck2, Network, Plus, ScrollText, Wifi, WifiOff } from 'lucide-react'
+import { FileCheck2, FlaskConical, Network, Plus, ScrollText, Wifi, WifiOff } from 'lucide-react'
 import { StoreProvider, useStore } from './lib/store'
 import LineageView from './views/LineageView'
 import type { Selection } from './views/LineageView'
 import ReportView from './views/ReportView'
 import AuditView from './views/AuditView'
+import BenchView from './views/BenchView'
 import DatasetPanel from './panels/DatasetPanel'
 import ModelPanel from './panels/ModelPanel'
 import InferencePanel from './panels/InferencePanel'
@@ -14,18 +15,19 @@ import { Toasts } from './ui/kit'
 // Three.js is the heaviest dependency; load it after the UI is interactive.
 const CinemaBackdrop = lazy(() => import('./scene/CinemaBackdrop'))
 
-type View = 'lineage' | 'report' | 'audit'
+type View = 'lineage' | 'report' | 'bench' | 'audit'
 
 const VIEWS: Array<[View, string, typeof Network]> = [
   ['lineage', 'Lineage', Network],
   ['report', 'Assurance', FileCheck2],
+  ['bench', 'Benchmark', FlaskConical],
   ['audit', 'Audit trail', ScrollText],
 ]
 
 function fromHash(): { view: View; selected: Selection | null } {
   const [key, id] = window.location.hash.slice(1).split('=')
   if (id && (key === 'dataset' || key === 'model' || key === 'inference')) return { view: 'lineage', selected: { type: key, id } }
-  if (key === 'report' || key === 'audit') return { view: key, selected: null }
+  if (key === 'report' || key === 'audit' || key === 'bench') return { view: key, selected: null }
   return { view: 'lineage', selected: null }
 }
 
@@ -34,7 +36,7 @@ function Shell() {
   const [view, setView] = useState<View>(() => fromHash().view)
   const [selected, setSelected] = useState<Selection | null>(() => fromHash().selected)
 
-  // Deep links: #report, #audit, #model=<id>, #dataset=<id>, #inference=<id>
+  // Deep links: #report, #bench, #audit, #model=<id>, #dataset=<id>, #inference=<id>
   useEffect(() => {
     const next = selected ? `#${selected.type}=${selected.id}` : view === 'lineage' ? '' : `#${view}`
     if (window.location.hash !== next) history.replaceState(null, '', next || window.location.pathname)
@@ -96,6 +98,7 @@ function Shell() {
       <main className="main">
         {view === 'lineage' && <LineageView selected={selected} onSelect={setSelected} />}
         {view === 'report' && <ReportView />}
+        {view === 'bench' && <BenchView />}
         {view === 'audit' && <AuditView />}
       </main>
 
