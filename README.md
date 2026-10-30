@@ -1,126 +1,101 @@
 # VISENTRA
 
-> **SIH26228 — "From Data to Decision, Proving AI Integrity"**  
-> An open-source forensic assurance platform for Computer Vision supply chains. Provides immutable cryptographic verification across **datasets, model checkpoints, and inference outputs** to detect tampering, pixel backdoors (Trojan shortcuts), and data anomalies before deployment.
+**From data to decision, proving AI integrity.** (Smart India Hackathon SIH26228)
 
----
+VISENTRA is a forensic workstation for computer vision supply chains. It ties
+cryptographic provenance (hashes, Merkle roots, Ed25519 signatures) to behavioural
+checks (dataset screening and Trojan interrogation) on one live lineage graph, so a
+poisoned sample, a flipped weight bit or a planted backdoor all show up in the same
+place, and every prediction downstream of them loses its certificate.
 
-## Forensic Lab Instrument Showcase
+![Lineage view](docs/images/01_lineage.png)
 
-The VISENTRA interface embodies a physical forensic workstation—utilizing a warm paper canvas, crisp hairline borders, zero cosmetic drop-shadows, and high-density monospace evidentiary diffs.
+## The four pillars
 
-### 1. Interactive Lineage Graph
-The graph **is** the interface. It maps the end-to-end provenance chain from `Contributor → Dataset → Model → Inference Evidence → Assurance Certificate` with dynamic status-indicator stripes and orthogonal routing.
+| Pillar | What it proves | How |
+|---|---|---|
+| **I · Dataset integrity** | the training data is what was registered, and is clean | archives unpacked into content-addressed samples sealed by a SHA-256 Merkle root; 64-bit DCT pHash near-duplicates (Hamming ≤ 8); 512-D embedding scored with 0.55·Isolation Forest + 0.45·leave-one-out Mahalanobis (Hotelling T² normalised) |
+| **II · Model integrity** | the checkpoint has not changed since registration | SHA-256 plus a rename-invariant topology fingerprint, both computed in a network-less, resource-capped sandbox; byte-level diff naming the tensors a bit-flip touched |
+| **III · Backdoor screening** | the model does not hide a trigger | two-stage gate: five triggers × five anchors + STRIP superimposition, escalating to penultimate-layer activation clustering only when the black-box score crosses τ = 0.18 |
+| **IV · Inference binding** | each prediction came from exactly these artifacts | Ed25519 signature over (dataset root, model hash, topology, input hash, config hash, output, timestamp); tampering upstream invalidates certificates downstream in a staggered live cascade |
 
-![VISENTRA Lineage Graph Overview](docs/images/01_lineage_graph_overview.png)
+The four scores are combined with the blueprint's decoupled formula
+`S = 0.20·S_data + 0.30·S_model + 0.25·S_backdoor + 0.25·S_infer`, and the report can
+be exported as a signed certificate that anyone can verify offline.
 
----
+## Quick start
 
-### 2. Live Supply-Chain Tamper Detection
-Injecting corrupted bytes or altering model weights triggers an immediate cryptographic digest divergence. The lineage edge pulses red, the node switches to `[TAMPERED]`, and the collapsible bottom event drawer streams live forensic telemetry over WebSockets.
+```bash
+# backend (Python 3.11+)
+python -m venv .venv && . .venv/bin/activate          # .venv\Scripts\activate on Windows
+pip install -r backend/requirements-dev.txt
+uvicorn backend.main:app --reload --port 8000          # seeds a demo pipeline on first start
 
-![Tamper Demo Live Reaction](docs/images/02_tamper_demo_live_reaction.png)
+# frontend (Node 22)
+cd frontend && npm ci && npm run dev                   # http://localhost:5173
+```
 
----
+Or with Docker: `docker compose -f infra/docker-compose.yml up --build` (UI on :5173, API on :8000, Postgres underneath).
 
-### 3. Model Interrogation & Cryptographic Diff Room
-Clicking any model node slides out a full-height forensic panel:
-- **Left Column**: Character-by-character visual diff between the registered SHA-256 and disk binary digest.
-- **Right Column**: Neural Trojan test bench testing synthetic trigger perturbations (`checkerboard`, `blend`, `corner_patch`) with real-time confidence-shift dials and anomaly index scoring.
+The seeded demo contains a screened dataset with a planted near-duplicate and texture
+outlier, a Trojaned model v1.0 and its clean twin v1.1, and five signed inferences.
+Click **Model v1.0 → Bit-flip attack** and watch the cascade. [docs/USER_GUIDE.md](docs/USER_GUIDE.md) walks through the full five-minute demo.
 
-![Model Interrogation Panel](docs/images/03_model_interrogation_diff.png)
+## VisentraBench
 
----
+`python scripts/run_visentrabench.py` builds 180 supply-chain pipelines across five
+strata from scratch and scores four methods on them (results in
+[docs/benchmark](docs/benchmark/README.md)):
 
-### 4. Dataset Inspector: Near-Duplicate Detection & OOD Screening
-Clicking any dataset node triggers automated spatial quality analysis:
-- **Near-Duplicates**: Pairwise 64-bit perceptual hashing ($d\text{Hash} / p\text{Hash}$) isolates sample pairs within a Hamming distance $\le 8$.
-- **Out-of-Distribution (OOD)**: 96-dimensional color/spatial feature vectors fed into Isolation Forest / Mahalanobis estimators flag anomalous samples with outlier ratings.
-
-| Near-Duplicate Clustering | Out-of-Distribution Anomalies |
-|---|---|
-| ![Dataset Inspector Near Duplicates](docs/images/04_dataset_inspector_near_duplicates.png) | ![Dataset Inspector OOD Anomalies](docs/images/05_dataset_inspector_ood_anomalies.png) |
-
----
-
-### 5. Auditable Cryptographic Assurance Certificate
-Clicking **`Assurance Report`** generates an exportable, high-resolution audit certificate with a four-pillar weighted breakdown, vulnerability disclosures, and technical limitations.
-
-![Assurance Report Certificate](docs/images/06_cryptographic_assurance_report.png)
-
----
-
-## Core Verification Pillars
-
-| Pillar | Focus | Technique | Metric / Threshold |
+| Method | Attack recall (95% CI) | Clean FPR | Mean latency |
 |---|---|---|---|
-| **I. Dataset Quality** | Deduplication & OOD Detection | 64-bit perceptual hashing & Isolation Forest | Hamming $\le 8$ bits; Anomaly Score $> 0.80$ |
-| **II. Model Authenticity** | Binary Tampering & Bitflips | SHA-256 Content-Addressing & Architecture Digest | Exact character-by-character hex diff |
-| **III. Trojan Interrogation** | Black-box Backdoor Detection | Trigger injection (`checkerboard`, `blend`, etc.) | Anomaly Index $> 2.0$; Class Flip Rate |
-| **IV. Inference Proof** | Prediction Non-repudiation | Cryptographic binding tuple $(D, M, I, C)$ | Sealed HMAC-SHA256 evidence record |
+| B1 hash only (SLSA / in-toto style) | 50.0% (41.9–58.1) | 0.0% | 0.9 ms |
+| B3 STRIP only | 15.3% (10.3–22.0) | 0.0% | 252 ms |
+| B4 activation clustering, no gate | 0.7% (0.1–3.8) | 5.6% | 255 ms |
+| **VISENTRA complete** | **98.6% (95.1–99.6)** | 13.9% | 481 ms |
 
-$$\text{Overall Assurance Score} = 0.20 \cdot S_{\text{data}} + 0.30 \cdot S_{\text{model}} + 0.25 \cdot S_{\text{backdoor}} + 0.25 \cdot S_{\text{inference}}$$
+All of VISENTRA's false positives come from Pillar I on 16-image datasets, at the
+blueprint's thresholds. The benchmark is a controlled study on procedural data, not a
+substitute for CIFAR-10 or GTSRB, and the write-up says so.
 
----
+## Repository map
 
-## Quick Start Guide
-
-### 1. Prerequisites
-- **Python**: 3.10+ (64-bit)
-- **Node.js**: 18.x or 20.x
-
-### 2. Backend Setup
-```bash
-# Clone the repository
-git clone https://github.com/FarhanAaqil/Visentra.git
-cd Visentra
-
-# Set up Python virtual environment
-python -m venv .venv
-.\.venv\Scripts\activate        # On Windows
-# source .venv/bin/activate     # On Linux / macOS
-
-# Install backend dependencies
-pip install -r backend/requirements.txt
-
-# Start FastAPI server
-python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
+```
+backend/
+  api/            FastAPI routers (lineage, datasets, models, scans, inference, report, audit, bench)
+  assurance/      dataset checks, archive unpacking, backdoor engine, signer, model zoo, procedural data
+  sandbox/        subprocess worker that is the only place models are ever loaded
+  bench/          VisentraBench harness
+  db/             SQLAlchemy models and Alembic migrations
+frontend/         React 19 + Three.js "Cherry Cinema" workstation
+scripts/          demo seeder, benchmark runner, CI smoke check
+docs/             research blueprint, roadmap, benchmark results, user guide, screenshots
+tests/            pytest suite (92% coverage, gate at 85%)
 ```
 
-### 3. Frontend Setup
-```bash
-# In a new terminal:
-cd Visentra/frontend
-npm install
-npm run dev -- --host 127.0.0.1
-```
-Open **`http://127.0.0.1:5173/`** in your browser.
+## Development
 
-### 4. Seed Forensic Demo Data
-To populate the database with a pre-configured supply chain, model checkpoint, and dataset anomalies:
 ```bash
-python scripts/seed_demo.py
+ruff check backend scripts tests && ruff format --check backend scripts tests
+pytest -q --cov
+alembic upgrade head && alembic check
+cd frontend && npm run lint && npm run typecheck && npm run build
 ```
 
----
+CI runs all of the above, an end-to-end smoke test against a live server, and both
+Docker image builds on every pull request.
 
-## Complete User Guide & Architectural Flowcharts
+## Configuration
 
-For an exhaustive technical breakdown, sequence flowcharts, trigger algorithms, and operational walkthroughs, refer to the full manual:
+See [backend/.env.example](backend/.env.example). The important ones: `DATABASE_URL`,
+`STORAGE_ROOT`, `SIGNING_KEY` (otherwise a key is generated under `storage/keys`),
+`ENABLE_DEMO` and `AUTO_SEED` (turn both off outside demos) and `EMBEDDER_ONNX` to
+plug in a real backbone for OOD embeddings.
 
-📖 **[Read the VISENTRA System Architecture & Forensic User Guide](USER_GUIDE.md)**
+## Limitations
 
----
-
-## Technology Stack
-
-- **Frontend**: React 18, TypeScript, Vite, React Flow, IBM Plex Mono, Inter
-- **Backend API**: Python, FastAPI, Pydantic v2, WebSockets
-- **ML & CV Engine**: ONNXRuntime, PyTorch, OpenCV, scikit-learn, imagehash, Pillow, NumPy
-- **Persistence & CAS**: SQLite (with AsyncPG / PostgreSQL support), local content-addressed storage (CAS)
-
----
-
-## License
-
-MIT License. Developed for SIH26228.
+The report lists them, and they are worth repeating. Trojan screening covers a fixed
+trigger library and is not a proof of absence. Hashes and signatures cannot detect an
+artifact that was malicious when it was first registered (that is what Pillars I and
+III are for). The default OOD embedding is hand-built. And whoever holds the signing
+key can mint certificates.
