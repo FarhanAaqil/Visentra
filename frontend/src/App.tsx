@@ -36,6 +36,17 @@ function Shell() {
   const [view, setView] = useState<View>(() => fromHash().view)
   const [selected, setSelected] = useState<Selection | null>(() => fromHash().selected)
 
+  // Follow links pasted into the address bar while the app is already open.
+  useEffect(() => {
+    const onHash = () => {
+      const next = fromHash()
+      setView(next.view)
+      setSelected(next.selected)
+    }
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
+
   // Deep links: #report, #bench, #audit, #model=<id>, #dataset=<id>, #inference=<id>
   useEffect(() => {
     const next = selected ? `#${selected.type}=${selected.id}` : view === 'lineage' ? '' : `#${view}`
