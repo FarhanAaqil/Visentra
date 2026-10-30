@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend import storage
 from backend.api.audit import actor_header, log_audit
+from backend.api.cascade import cascade_from_model
 from backend.api.deps import get_or_404
 from backend.api.ws import broadcast
 from backend.assurance.model import runtime
@@ -72,9 +73,12 @@ class ModelOut(BaseModel):
     created_at: str
     verified_at: str | None
     integrity: ModelIntegrity | None = None
+    invalidated_inferences: list[str] = []
 
 
-def model_out(m: Model, integrity: ModelIntegrity | None = None) -> ModelOut:
+def model_out(
+    m: Model, integrity: ModelIntegrity | None = None, invalidated: list[str] | None = None
+) -> ModelOut:
     return ModelOut(
         id=m.id,
         contributor_id=m.contributor_id,
@@ -90,6 +94,7 @@ def model_out(m: Model, integrity: ModelIntegrity | None = None) -> ModelOut:
         created_at=iso(m.created_at),
         verified_at=iso(m.verified_at) or None,
         integrity=integrity,
+        invalidated_inferences=invalidated or [],
     )
 
 
@@ -214,10 +219,12 @@ async def verify_model(
     before = {"status": model.status, "actual_sha256": model.actual_sha256}
 
     actual, integrity = await check_model(model)
+    invalidated: list[str] = []
     if integrity.hash_match:
         model.status = "suspicious" if model.status == "suspicious" else "verified"
     else:
         model.status = "tampered"
+        invalidated = await cascade_from_model(db, model, actor)
     model.actual_sha256 = actual
     model.verified_at = utcnow()
 
@@ -239,4 +246,4 @@ async def verify_model(
 
     if actual is None:
         raise HTTPException(status_code=422, detail="Model file missing, integrity broken")
-    return model_out(model, integrity)
+    return model_out(model, integrity, invalidated)

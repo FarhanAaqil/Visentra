@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend import storage
 from backend.api.audit import actor_header, log_audit
+from backend.api.cascade import cascade_from_dataset
 from backend.api.deps import get_or_404
 from backend.api.ws import broadcast
 from backend.assurance.data.archive import ArchiveError, extract_images
@@ -40,6 +41,7 @@ class DatasetOut(BaseModel):
     created_at: str
     verified_at: str | None
     integrity: IntegrityOut | None = None
+    invalidated_inferences: list[str] = []
 
 
 class SampleOut(BaseModel):
@@ -205,11 +207,13 @@ async def verify_dataset(
 
     actual, integrity = await check_integrity(dataset, await dataset_samples(db, dataset_id))
     intact = integrity.archive_match and integrity.merkle_match and not integrity.missing_samples
+    invalidated: list[str] = []
     if intact:
         # A flagged dataset keeps its hygiene verdict; only the hash state is re-checked here.
         dataset.status = "flagged" if dataset.status == "flagged" else "verified"
     else:
         dataset.status = "tampered"
+        invalidated = await cascade_from_dataset(db, dataset.id, actor)
     dataset.actual_sha256 = actual
     dataset.verified_at = utcnow()
 
@@ -226,4 +230,6 @@ async def verify_dataset(
     await broadcast(
         {"type": "node_status", "node_type": "dataset", "id": dataset.id, "status": dataset.status}
     )
-    return dataset_out(dataset, integrity)
+    out = dataset_out(dataset, integrity)
+    out.invalidated_inferences = invalidated
+    return out

@@ -12,8 +12,9 @@ def _uuid() -> str:
 
 
 def utcnow() -> datetime.datetime:
-    """Naive UTC timestamp (SQLite drops tzinfo anyway, so we keep it uniform)."""
-    return datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
+    """Naive UTC timestamp at millisecond precision, the precision that gets signed."""
+    now = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
+    return now.replace(microsecond=now.microsecond // 1000 * 1000)
 
 
 def iso(ts: datetime.datetime | None) -> str:

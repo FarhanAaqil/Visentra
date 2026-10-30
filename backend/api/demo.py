@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend import storage
 from backend.api.audit import actor_header, log_audit
+from backend.api.cascade import cascade_from_model
 from backend.api.datasets import dataset_samples
 from backend.api.deps import get_or_404, require_demo
 from backend.api.models import vault_copy
@@ -64,9 +65,14 @@ async def tamper_model(
         before=before,
         after={"status": "tampered", "flipped_offsets": offsets},
     )
+    invalidated = await cascade_from_model(db, model, actor)
     await db.commit()
     await broadcast({"type": "node_status", "node_type": "model", "id": model_id, "status": "tampered"})
-    return {"detail": f"Flipped {len(offsets)} bits in the stored checkpoint.", "flipped_offsets": offsets}
+    return {
+        "detail": f"Flipped {len(offsets)} bits in the stored checkpoint.",
+        "flipped_offsets": offsets,
+        "invalidated_inferences": invalidated,
+    }
 
 
 @router.post("/datasets/{dataset_id}/tamper")
