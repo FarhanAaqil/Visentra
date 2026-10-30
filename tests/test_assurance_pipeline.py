@@ -219,3 +219,12 @@ async def test_seeded_demo_exercises_every_pillar(client):
     assert pillars["backdoor_screening"]["score"] < 20
     assert pillars["inference_binding"]["score"] == 100.0
     assert report["findings_count"]["models_suspicious"] == 1
+
+
+async def test_restore_keeps_the_behavioural_verdict(client, contributor):
+    _, model = await _pipeline(client, contributor["id"], trojan=True, seed=51)
+    await client.post(f"/models/{model['id']}/backdoor-scan")
+    await client.post(f"/demo/models/{model['id']}/tamper")
+    assert (await client.post(f"/models/{model['id']}/verify")).json()["status"] == "tampered"
+    await client.post(f"/demo/models/{model['id']}/restore")
+    assert (await client.post(f"/models/{model['id']}/verify")).json()["status"] == "suspicious"
