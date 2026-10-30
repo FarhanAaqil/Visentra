@@ -74,8 +74,21 @@ def key_id(pub_hex: str | None = None) -> str:
     return hashlib.sha256(bytes.fromhex(pub_hex or public_key_hex())).hexdigest()[:16]
 
 
+def _normalise(value: Any) -> Any:
+    """Make numbers language-neutral: JavaScript has no int/float split, so 75.0 comes back as 75."""
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, dict):
+        return {k: _normalise(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [_normalise(v) for v in value]
+    return value
+
+
 def canonical_bytes(payload: Any) -> bytes:
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    """Sorted, compact JSON with integral floats as integers, so every JSON stack agrees on the bytes."""
+    text = json.dumps(_normalise(payload), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return text.encode("utf-8")
 
 
 def binding_tuple(evidence: dict[str, Any]) -> dict[str, Any]:
