@@ -109,6 +109,7 @@ async def test_trojaned_model_is_flagged_with_evidence(client, contributor):
 
 async def test_clean_twin_passes_without_escalation(client, contributor):
     _, model = await _pipeline(client, contributor["id"], trojan=False)
+    assert (await client.get(f"/models/{model['id']}/backdoor-scans/latest")).status_code == 204
     scan = (await client.post(f"/models/{model['id']}/backdoor-scan")).json()
     assert scan["verdict"] == "clean"
     assert scan["escalated"] == []
@@ -228,3 +229,29 @@ async def test_restore_keeps_the_behavioural_verdict(client, contributor):
     assert (await client.post(f"/models/{model['id']}/verify")).json()["status"] == "tampered"
     await client.post(f"/demo/models/{model['id']}/restore")
     assert (await client.post(f"/models/{model['id']}/verify")).json()["status"] == "suspicious"
+
+
+def _through_javascript(value):
+    """What JSON.parse + JSON.stringify do to Python output: integral floats lose their '.0'."""
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, dict):
+        return {k: _through_javascript(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_through_javascript(v) for v in value]
+    return value
+
+
+async def test_certificate_survives_a_browser_round_trip(client, contributor):
+    await _pipeline(client, contributor["id"], trojan=False, seed=61)
+    cert = (await client.get(f"/report/{contributor['id']}/certificate")).json()
+    assert any(isinstance(v, float) and v.is_integer() for v in cert["document"]["report"]["score"].values())
+    replayed = _through_javascript(cert)
+    check = (await client.post("/report/certificate/verify", json=replayed)).json()
+    assert check["signature_valid"] is True
+
+
+def test_inference_signature_is_number_format_independent():
+    payload = {**PAYLOAD, "output": {"top_class": 7, "confidence": 1.0}}
+    sig, pub = signer.sign_evidence_tuple(payload)
+    assert signer.verify_evidence_signature(_through_javascript(payload), sig, pub)

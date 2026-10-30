@@ -65,7 +65,7 @@ export const api = {
     post<Model>('/models', form({ contributor_id: cid, version, file, dataset_id: datasetId })),
   verifyModel: (id: string) => post<Model>(`/models/${id}/verify`),
   scanModel: (id: string) => post<ScanReport>(`/models/${id}/backdoor-scan`),
-  latestScan: (id: string) => get<ScanReport>(`/models/${id}/backdoor-scans/latest`),
+  latestScan: (id: string) => get<ScanReport | ''>(`/models/${id}/backdoor-scans/latest`).then((r) => r || null),
   tamperModel: (id: string) =>
     post<{ detail: string; flipped_offsets: number[]; invalidated_inferences: string[] }>(`/demo/models/${id}/tamper`),
   restoreModel: (id: string) => post<{ detail: string }>(`/demo/models/${id}/restore`),

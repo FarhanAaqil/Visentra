@@ -9,7 +9,7 @@ import json
 import uuid
 
 import cv2
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -184,5 +184,5 @@ async def get_latest_scan(model_id: str, db: AsyncSession = Depends(get_db)):
     scan_id = await _latest_scan_id(db, model_id)
     path = storage.evidence() / f"{scan_id}.json" if scan_id else None
     if not path or not path.exists():
-        raise HTTPException(status_code=404, detail="This model has not been scanned yet")
+        return Response(status_code=204)  # not scanned yet is a state, not an error
     return json.loads(path.read_text())

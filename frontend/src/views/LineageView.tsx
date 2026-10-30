@@ -1,4 +1,4 @@
-import { memo, useMemo } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Background,
   BaseEdge,
@@ -8,7 +8,7 @@ import {
   ReactFlow,
   getBezierPath,
 } from '@xyflow/react'
-import type { Edge, EdgeProps, Node, NodeProps } from '@xyflow/react'
+import type { Edge, EdgeProps, Node, NodeChange, NodeProps, ReactFlowInstance, XYPosition } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { Cpu, Database, Fingerprint, Network, User } from 'lucide-react'
 import { useStore } from '../lib/store'
@@ -128,6 +128,39 @@ function PulseStrip() {
 export default function LineageView({ selected, onSelect }: { selected: Selection | null; onSelect: (s: Selection) => void }) {
   const { chain, chainError, flashing } = useStore()
 
+  // React Flow forgets a node's measured size whenever it receives a fresh node object,
+  // and nothing re-measures a node whose size did not change, so it would stay hidden.
+  // Keep sizes and drag positions here and hand them back on every rebuild.
+  const [sizes, setSizes] = useState<Record<string, { width: number; height: number }>>({})
+  const [moved, setMoved] = useState<Record<string, XYPosition>>({})
+  const onNodesChange = useCallback((changes: NodeChange[]) => {
+    const dims: Record<string, { width: number; height: number }> = {}
+    const pos: Record<string, XYPosition> = {}
+    for (const c of changes) {
+      if (c.type === 'dimensions' && c.dimensions) dims[c.id] = c.dimensions
+      if (c.type === 'position' && c.position) pos[c.id] = c.position
+    }
+    if (Object.keys(dims).length) setSizes((s) => ({ ...s, ...dims }))
+    if (Object.keys(pos).length) setMoved((m) => ({ ...m, ...pos }))
+  }, [])
+
+  // Refit whenever the canvas changes shape (strip wrapping, phone rotation) or the graph grows.
+  const flow = useRef<ReactFlowInstance<Node<ArtifactData>, Edge<FlowEdgeData>> | null>(null)
+  const canvas = useRef<HTMLDivElement>(null)
+  const nodeCount = chain?.nodes.length ?? 0
+  useEffect(() => {
+    const el = canvas.current
+    if (!el) return
+    const refit = () => void flow.current?.fitView({ padding: 0.35, duration: 350 })
+    const observer = new ResizeObserver(refit)
+    observer.observe(el)
+    const t = setTimeout(refit, 120)
+    return () => {
+      observer.disconnect()
+      clearTimeout(t)
+    }
+  }, [nodeCount])
+
   const { nodes, edges } = useMemo(() => {
     if (!chain) return { nodes: [] as Node<ArtifactData>[], edges: [] as Edge<FlowEdgeData>[] }
     const byTier: ChainNode[][] = [[], [], [], []]
@@ -139,7 +172,8 @@ export default function LineageView({ selected, onSelect }: { selected: Selectio
         nodes.push({
           id: n.id,
           type: 'artifact',
-          position: { x: t * 320, y: (i - (tier.length - 1) / 2) * gapY },
+          position: moved[n.id] ?? { x: t * 320, y: (i - (tier.length - 1) / 2) * gapY },
+          measured: sizes[n.id],
           data: { node: n, selected: selected?.id === n.id, flashing: flashing.has(n.id) },
         })
       })
@@ -151,7 +185,7 @@ export default function LineageView({ selected, onSelect }: { selected: Selectio
       return { id: e.id, source: e.source, target: e.target, type: 'flow', data: { tone: t } }
     })
     return { nodes, edges }
-  }, [chain, selected, flashing])
+  }, [chain, selected, flashing, sizes, moved])
 
   if (chainError && !chain) {
     return (
@@ -164,7 +198,7 @@ export default function LineageView({ selected, onSelect }: { selected: Selectio
   return (
     <div className="view col" style={{ gap: 12 }}>
       <PulseStrip />
-      <div className="glass canvas" style={{ position: 'relative', overflow: 'hidden', flex: 1, minHeight: 0 }}>
+      <div ref={canvas} className="glass canvas" style={{ position: 'relative', overflow: 'hidden', flex: 1, minHeight: 320 }}>
       {chain && chain.nodes.length <= 1 && (
         <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', zIndex: 4, pointerEvents: 'none' }}>
           <Empty icon={<Network size={38} />} title="An empty supply chain">
@@ -183,6 +217,10 @@ export default function LineageView({ selected, onSelect }: { selected: Selectio
         maxZoom={1.6}
         nodesConnectable={false}
         nodesDraggable
+        onNodesChange={onNodesChange}
+        onInit={(instance) => {
+          flow.current = instance
+        }}
         onNodeClick={(_, n) => onSelect({ type: (n.data as ArtifactData).node.type, id: n.id })}
         proOptions={{ hideAttribution: true }}
         style={{ background: 'transparent' }}
