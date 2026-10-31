@@ -3,6 +3,8 @@ name = "visentra"
 version = "1.0.0"
 description = "Cryptographic provenance and behavioural assurance for computer vision supply chains"
 requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Farhan Aaqil" }]
 
 [tool.ruff]
 line-length = 110

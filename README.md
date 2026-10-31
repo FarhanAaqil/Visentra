@@ -99,3 +99,7 @@ trigger library and is not a proof of absence. Hashes and signatures cannot dete
 artifact that was malicious when it was first registered (that is what Pillars I and
 III are for). The default OOD embedding is hand-built. And whoever holds the signing
 key can mint certificates.
+
+## License
+
+Released under the [MIT License](LICENSE). Copyright (c) 2026 Farhan Aaqil.
