@@ -1,4 +1,4 @@
-"""Decoupled four-pillar assurance report (blueprint equation 6, fixes D-13).
+"""Decoupled four-pillar assurance report.
 
     S_data     = clamp(100 * intact/total - 10 * min(5, dup_pairs) - 8 * min(5, ood_flagged))
     S_model    = clamp(100 * intact/total - 100 * tampered/total)       binary authenticity only

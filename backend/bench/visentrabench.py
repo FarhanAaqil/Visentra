@@ -1,6 +1,6 @@
 """VisentraBench: generated supply-chain pipelines scored by every assurance method.
 
-Five strata, each split into two attack variants (blueprint section 11):
+Five strata, each split into two attack variants:
 
   S1 clean            untouched dataset, clean model, valid signed inference
   S2 dataset          near-duplicate poison amplification | OOD texture injection
@@ -295,7 +295,7 @@ def summarise(rows: list[dict[str, Any]], seeds: list[int], elapsed_s: float) ->
         },
         "notes": [
             "S1 clean pipelines measure false positives; recall is computed over S2 to S5.",
-            "Every VISENTRA false positive comes from Pillar I screening at the blueprint thresholds "
+            "Every VISENTRA false positive comes from Pillar I screening at the default thresholds "
             "(OOD > 0.70, Hamming <= 8) on 16-image datasets; see visentra_false_positive_sources.",
             "By-stratum and by-variant numbers for S1 are flag rates, i.e. false positives.",
             "Pipelines are procedurally generated 64x64 scenes and hand-weighted ONNX classifiers, "

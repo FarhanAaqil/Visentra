@@ -19,7 +19,7 @@ place, and every prediction downstream of them loses its certificate.
 | **III · Backdoor screening** | the model does not hide a trigger | two-stage gate: five triggers × five anchors + STRIP superimposition, escalating to penultimate-layer activation clustering only when the black-box score crosses τ = 0.18 |
 | **IV · Inference binding** | each prediction came from exactly these artifacts | Ed25519 signature over (dataset root, model hash, topology, input hash, config hash, output, timestamp); tampering upstream invalidates certificates downstream in a staggered live cascade |
 
-The four scores are combined with the blueprint's decoupled formula
+The four scores are combined with a decoupled weighted formula
 `S = 0.20·S_data + 0.30·S_model + 0.25·S_backdoor + 0.25·S_infer`, and the report can
 be exported as a signed certificate that anyone can verify offline.
 
@@ -55,7 +55,7 @@ strata from scratch and scores four methods on them (results in
 | **VISENTRA complete** | **98.6% (95.1–99.6)** | 13.9% | 481 ms |
 
 All of VISENTRA's false positives come from Pillar I on 16-image datasets, at the
-blueprint's thresholds. The benchmark is a controlled study on procedural data, not a
+default thresholds. The benchmark is a controlled study on procedural data, not a
 substitute for CIFAR-10 or GTSRB, and the write-up says so.
 
 ## Repository map
@@ -69,7 +69,7 @@ backend/
   db/             SQLAlchemy models and Alembic migrations
 frontend/         React 19 + Three.js "Cherry Cinema" workstation
 scripts/          demo seeder, benchmark runner, CI smoke check
-docs/             research blueprint, roadmap, benchmark results, user guide, screenshots
+docs/             benchmark results, user guide, report template, design prototype, screenshots
 tests/            pytest suite (92% coverage, gate at 85%)
 ```
 

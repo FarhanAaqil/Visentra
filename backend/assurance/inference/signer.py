@@ -23,7 +23,7 @@ from backend.config import settings
 
 ALGORITHM = "Ed25519"
 
-# Fields bound into every inference signature (blueprint equation 5).
+# Fields bound into every inference signature.
 BINDING_FIELDS = (
     "inference_id",
     "dataset_merkle_root",
