@@ -2,6 +2,8 @@
   "name": "visentra-ui",
   "private": true,
   "version": "1.0.0",
+  "license": "MIT",
+  "author": "Farhan Aaqil",
   "type": "module",
   "scripts": {
     "dev": "vite",
