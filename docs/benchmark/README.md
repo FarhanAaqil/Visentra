@@ -48,13 +48,13 @@ method decides whether the pipeline is compromised. 36 pipelines per stratum:
 - Activation clustering without a consistency gate is dominated by benign feature shifts: colour patches separate
   activations about as well as the real trigger, so at a threshold that keeps clean models quiet it finds almost nothing.
 - VISENTRA's only misses are weak Trojans (88.9% caught). All of its clean false positives come from
-  Pillar I screening ({'data': 5}) on 16-image datasets at the blueprint thresholds;
+  Pillar I screening ({'data': 5}) on 16-image datasets at the default thresholds;
   larger datasets and per-deployment threshold calibration are the obvious levers.
 
 ## Caveats
 
 - S1 clean pipelines measure false positives; recall is computed over S2 to S5.
-- Every VISENTRA false positive comes from Pillar I screening at the blueprint thresholds (OOD > 0.70, Hamming <= 8) on 16-image datasets; see visentra_false_positive_sources.
+- Every VISENTRA false positive comes from Pillar I screening at the default thresholds (OOD > 0.70, Hamming <= 8) on 16-image datasets; see visentra_false_positive_sources.
 - By-stratum and by-variant numbers for S1 are flag rates, i.e. false positives.
 - Pipelines are procedurally generated 64x64 scenes and hand-weighted ONNX classifiers, not CIFAR-10, GTSRB or Tiny-ImageNet; treat the numbers as a controlled study.
 - B4 flags a model when the best trigger silhouette reaches 0.67, the highest value seen on clean models over held-out seeds 900-909; without a flip-consistency gate, benign colour patches separate activations about as well as a real trigger does.

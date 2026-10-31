@@ -3,7 +3,7 @@
 * SHA-256 per sample and a binary Merkle root that seals the whole set.
 * 64-bit DCT perceptual hash, near duplicates at Hamming distance <= 8.
 * 512-D spatial/spectral embedding (or an ONNX feature extractor when one is
-  configured) scored with the hybrid anomaly measure from the blueprint:
+  configured) scored with a hybrid anomaly measure:
 
       A_ood = 0.55 * s_IF + 0.45 * min(1, d_M / ref)
 

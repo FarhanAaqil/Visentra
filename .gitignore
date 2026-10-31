@@ -62,7 +62,7 @@ backend/db/migrations/versions/*.pyc
 checklist
 VISENTRA_Implementation_Plan.md
 VISENTRA_UIUX_Implementation_Plan.md
-# Originals kept at the repo root by the author; tracked copies live in docs/
+# Private reference documents kept at the repo root by the author
 /Visentra_Master_Research_Blueprint.docx
 /visentra_cherry_cinema_standalone.html
 
